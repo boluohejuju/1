@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>MediaPipe 手部骨架 + AR石头抓取</title>
+<title>MediaPipe 手部骨架 + AR石头砸地</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: #000; overflow: hidden;
@@ -72,7 +72,6 @@
   .guide-row { display: flex; align-items: flex-start; gap: 6px; }
   .guide-row b { color: #fff; font-weight: 600; }
 
-  /* 参数面板 */
   #paramPanel {
     position: absolute; top: 60px; right: 16px; z-index: 20;
     width: 260px;
@@ -129,6 +128,7 @@
   <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
   <canvas id="three-canvas"></canvas>
+  
   <div id="guide">
     <div class="guide-head" id="guideHead">
       <span>🪨 抓取石头</span>
@@ -138,14 +138,14 @@
       <div class="guide-row"><span>1.</span><span>将手伸入<b>石头范围</b>内</span></div>
       <div class="guide-row"><span>2.</span><span><b>五指完全合拢</b>即可抓取</span></div>
       <div class="guide-row"><span>3.</span><span>移动手部，石头零延迟跟随</span></div>
-      <div class="guide-row"><span>4.</span><span>手指张开，石头<b>自由落体</b>落回地面</span></div>
+      <div class="guide-row"><span>4.</span><span>手指张开，石头<b>重重砸下并弹跳两次</b></span></div>
     </div>
   </div>
+  
   <div id="status">正在加载...</div>
   <div id="hint">将手放入画面 · 伸入石头范围并五指合拢</div>
   <div class="btn" id="toggleSkeleton">骨架 OFF</div>
 
-  <!-- 参数面板 -->
   <div id="paramPanel">
     <div style="font-size:13px; font-weight:700; letter-spacing:0.04em; margin-bottom:2px;">⚙️ 参数面板</div>
     <div class="param-row">
@@ -182,23 +182,16 @@
     "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
   }
 }
-</script>
-<script type="module">
+</script><script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// ============================================================
-//  参数配置（保留原版抓取参数）
-// ============================================================
 const CONFIG = {
   GRAB_DISTANCE_RATIO: 1.35, 
   RELEASE_DISTANCE_RATIO: 1.7,
   GRAB_SCREEN_DIST: 0.12,
 };
 
-// ============================================================
-//  获取 DOM 元素
-// ============================================================
 const video    = document.getElementById('video');
 const canvas   = document.getElementById('canvas');
 const ctx      = canvas.getContext('2d');
@@ -213,9 +206,6 @@ document.getElementById('guideHead').addEventListener('click', () => {
   fold.textContent = hidden ? '收起' : '展开';
 });
 
-// ============================================================
-//  设备及参数设置
-// ============================================================
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS|HuaweiBrowser|HonorBrowser|MicroMessenger|WeChat/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
 const VIDEO_W = IS_MOBILE ? 640 : 1280;
 const VIDEO_H = IS_MOBILE ? 480 : 720;
@@ -223,17 +213,10 @@ const MP_W = IS_MOBILE ? 160 : 256;
 const MP_H = IS_MOBILE ? 120 : 192;
 const MP_INTERVAL_MS = IS_MOBILE ? 66 : 33;
 
-// ============================================================
-//  手部常量与映射
-// ============================================================
 const KP_NAMES = ['WRIST','THUMB_CMC','THUMB_MCP','THUMB_IP','THUMB_TIP','INDEX_MCP','INDEX_PIP','INDEX_DIP','INDEX_TIP','MIDDLE_MCP','MIDDLE_PIP','MIDDLE_DIP','MIDDLE_TIP','RING_MCP','RING_PIP','RING_DIP','RING_TIP','PINKY_MCP','PINKY_PIP','PINKY_DIP','PINKY_TIP'];
 const HIGHLIGHT_POINTS = [4, 8, 12, 16, 20, 0];
 const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-const FINGER_TIPS = [4, 8, 12, 16, 20];
 
-// ============================================================
-//  高清画布布局计算
-// ============================================================
 let layout = { offsetX: 0, offsetY: 0, drawW: 1, drawH: 1 };
 function updateLayout() {
   const vw = video.videoWidth || VIDEO_W, vh = video.videoHeight || VIDEO_H;
@@ -258,9 +241,6 @@ function nToC(nx, ny) {
   return { x: layout.offsetX + (1 - nx) * layout.drawW, y: layout.offsetY + ny * layout.drawH };
 }
 
-// ============================================================
-//  MediaPipe
-// ============================================================
 const mpCanvas = document.createElement('canvas');
 mpCanvas.width = MP_W; mpCanvas.height = MP_H;
 const mpCtx = mpCanvas.getContext('2d', { alpha: false });
@@ -285,6 +265,7 @@ function processHands(results) {
   handSlots.left.lms = leftDet;
   handSlots.left.lastCenter = leftDet ? getHandCenter(leftDet) : null;
 }
+
 async function initCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -296,7 +277,7 @@ async function initCamera() {
     video.addEventListener('loadedmetadata', updateLayout);
   } catch (e) { statusEl.textContent = '摄像头失败：' + e.name; }
 }
-let handsInstance = null, mpBusy = false, lastMpTime = 0, mpReady = false, mpLastDuration = 0;
+let handsInstance = null, mpBusy = false, lastMpTime = 0, mpReady = false;
 async function initHands() {
   if (typeof Hands === 'undefined') { statusEl.textContent = 'MediaPipe 库加载失败'; return; }
   const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
@@ -310,22 +291,12 @@ function pumpMP() {
   if (now - lastMpTime < MP_INTERVAL_MS) return;
   mpBusy = true; lastMpTime = now;
   mpCtx.drawImage(video, 0, 0, MP_W, MP_H);
-  const t0 = performance.now();
-  handsInstance.send({ image: mpCanvas }).then(() => { mpBusy = false; mpLastDuration = performance.now() - t0; }).catch(() => { mpBusy = false; });
+  handsInstance.send({ image: mpCanvas }).then(() => { mpBusy = false; }).catch(() => { mpBusy = false; });
 }
 
-// ============================================================
-//  Three.js 平面AR场景与物理
-// ============================================================
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-// 可调参数
-let cameraY = -1.7;
-let lookAtY = 0;
-let cameraZ = 10;
-let modelScale = 1.0;
-let gridOpacity = 0.4;
+let cameraY = -1.7, lookAtY = 0, cameraZ = 10, modelScale = 1.0, gridOpacity = 0.4;
 
 function updateCamera() {
   camera.position.set(0, cameraY, cameraZ);
@@ -346,42 +317,19 @@ const fillLight = new THREE.DirectionalLight(0xaaccff, 0.4);
 fillLight.position.set(-4, 5, -4);
 scene.add(fillLight);
 
-// ============================================================
-//  地面网格（平面AR感）
-// ============================================================
 const groundY = -2.5;
-
-// 网格辅助线
 const gridHelper = new THREE.GridHelper(20, 40, 0x00d4ff, 0x0088aa);
 gridHelper.position.y = groundY;
 gridHelper.material.transparent = true;
 gridHelper.material.opacity = gridOpacity;
 scene.add(gridHelper);
 
-// 半透明地面平面（增强AR平面感）
-const groundPlaneMat = new THREE.MeshBasicMaterial({
-  color: 0x004466,
-  transparent: true,
-  opacity: 0.12,
-  side: THREE.DoubleSide,
-  depthWrite: false
-});
+const groundPlaneMat = new THREE.MeshBasicMaterial({ color: 0x004466, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
 const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), groundPlaneMat);
 groundPlane.rotation.x = -Math.PI / 2;
 groundPlane.position.y = groundY - 0.001;
 scene.add(groundPlane);
 
-// 边缘发光圆环
-const ringGeo = new THREE.RingGeometry(9.8, 10.0, 64);
-const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
-const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-ringMesh.rotation.x = -Math.PI / 2;
-ringMesh.position.y = groundY + 0.005;
-scene.add(ringMesh);
-
-// ============================================================
-//  影子纹理
-// ============================================================
 function createShadowTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 128;
   const ct = c.getContext('2d');
@@ -399,10 +347,10 @@ shadowMesh.rotation.x = -Math.PI / 2;
 shadowMesh.position.y = groundY + 0.01;
 scene.add(shadowMesh);
 
-// ============================================================
-//  物理状态（石头：自由落体，不反弹，落回地面）
-// ============================================================
-const GRAVITY = -19.6;
+const GRAVITY = -40.0;       
+const RESTITUTION = 0.3;     
+const MIN_VELOCITY = 1.0;    
+
 const ballState = {
   position: new THREE.Vector3(0, groundY + 0.5, 0),
   velocity: new THREE.Vector3(0, 0, 0),
@@ -410,6 +358,7 @@ const ballState = {
   isFalling: false,
   isResting: true,
   releaseCooldown: 0,
+  bounceCount: 0,            
   angularVelocity: new THREE.Vector3(0, 0, 0)
 };
 let currentGroundY = groundY;
@@ -419,35 +368,26 @@ const raycaster = new THREE.Raycaster();
 const grabPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.2); 
 const ndcRaycaster = new THREE.Raycaster();
 
-// ============================================================
-//  加载石头模型
-// ============================================================
 const loader = new GLTFLoader();
 loader.load('https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/stone.glb', (gltf) => {
   basketball = gltf.scene;
-  
-  // 计算原始大小并归一化
   const box = new THREE.Box3().setFromObject(basketball);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
   const baseScale = 1.0 / maxDim;
   basketball.scale.set(baseScale, baseScale, baseScale);
   
-  // 居中
   const box2 = new THREE.Box3().setFromObject(basketball);
   const center2 = box2.getCenter(new THREE.Vector3());
   
   const ballGroup = new THREE.Group();
   basketball.position.sub(center2);
   ballGroup.add(basketball);
-  
-  // 应用模型大小参数
   ballGroup.scale.set(modelScale, modelScale, modelScale);
   
   scene.add(ballGroup);
   basketball = ballGroup;
   
-  // 计算实际半径
   const box3 = new THREE.Box3().setFromObject(basketball);
   const size3 = box3.getSize(new THREE.Vector3());
   ballRadius = Math.max(size3.x, size3.y, size3.z) * 0.5;
@@ -456,73 +396,48 @@ loader.load('https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/sto
   ballState.position.set(0, currentGroundY + ballRadius, 0);
   basketball.position.copy(ballState.position);
   shadowMesh.position.y = currentGroundY + 0.01;
-  
-  console.log('石头模型加载完成, 半径:', ballRadius);
 }, undefined, (err) => {
   console.error('模型加载失败:', err);
   statusEl.textContent = '模型加载失败';
 });
 
-// ============================================================
-//  抓取逻辑（保留原手势，去除拍飞）
-// ============================================================
 function getActiveHand() { return handSlots.right.lms || handSlots.left.lms || null; }
-
-function getPalmSize(lms) {
-  return Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1;
-}
-
+function getPalmSize(lms) { return Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1; }
 function isFullyGrabbed(lms) {
   if (!lms) return false;
   const palmSize = getPalmSize(lms);
   const distToWrist = (idx) => Math.hypot(lms[idx].x - lms[0].x, lms[idx].y - lms[0].y) / palmSize;
-  return distToWrist(8) < CONFIG.GRAB_DISTANCE_RATIO && 
-         distToWrist(12) < CONFIG.GRAB_DISTANCE_RATIO && 
-         distToWrist(16) < CONFIG.GRAB_DISTANCE_RATIO && 
-         distToWrist(20) < CONFIG.GRAB_DISTANCE_RATIO;
+  return distToWrist(8) < CONFIG.GRAB_DISTANCE_RATIO && distToWrist(12) < CONFIG.GRAB_DISTANCE_RATIO && 
+         distToWrist(16) < CONFIG.GRAB_DISTANCE_RATIO && distToWrist(20) < CONFIG.GRAB_DISTANCE_RATIO;
 }
-
 function isHandOpen(lms) {
   if (!lms) return true;
   const palmSize = getPalmSize(lms);
   const distToWrist = (idx) => Math.hypot(lms[idx].x - lms[0].x, lms[idx].y - lms[0].y) / palmSize;
   return distToWrist(8) > CONFIG.RELEASE_DISTANCE_RATIO || distToWrist(12) > CONFIG.RELEASE_DISTANCE_RATIO;
 }
-
-function getVisualHandPos(lms) {
-  if (!lms) return null;
-  return { x: 1 - lms[12].x, y: lms[12].y };
-}
-
+function getVisualHandPos(lms) { if (!lms) return null; return { x: 1 - lms[12].x, y: lms[12].y }; }
 function getBallScreenPos() {
   const p = ballState.position.clone().project(camera);
   return { x: (1 + p.x) / 2, y: (1 - p.y) / 2 };
 }
-
 function getGrabTargetWorldPos(lms) {
   if (!lms) return null;
   const screenPos = nToC(lms[12].x, lms[12].y);
   const ndcX = (screenPos.x / window.innerWidth) * 2 - 1;
   const ndcY = -(screenPos.y / window.innerHeight) * 2 + 1;
-  
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
   const targetPos = new THREE.Vector3();
   raycaster.ray.intersectPlane(grabPlane, targetPos);
   return targetPos;
 }
-
-// ============================================================
-//  屏幕边界约束
-// ============================================================
 function getBallScreenRadius() {
   const p1 = ballState.position.clone().project(camera);
   const p2 = ballState.position.clone().add(new THREE.Vector3(ballRadius, 0, 0)).project(camera);
   return Math.abs(p1.x - p2.x) / 2;
 }
-
 function keepBallInsideScreen() {
   if (ballState.isHeld) return;
-  
   const ndc = ballState.position.clone().project(camera);
   const pRight = ballState.position.clone().add(new THREE.Vector3(ballRadius, 0, 0)).project(camera);
   const pLeft = ballState.position.clone().add(new THREE.Vector3(-ballRadius, 0, 0)).project(camera);
@@ -531,13 +446,11 @@ function keepBallInsideScreen() {
   
   const rX = Math.abs(pRight.x - pLeft.x) / 2;
   const rY = Math.abs(pTop.y - pBottom.y) / 2;
-  
   const padding = 0.02;
   const marginX = rX + padding;
   const marginY = rY + padding;
   
-  let targetNdcX = ndc.x;
-  let targetNdcY = ndc.y;
+  let targetNdcX = ndc.x, targetNdcY = ndc.y;
   let hitX = false, hitY = false;
   
   if (ndc.x - marginX < -1) { targetNdcX = -1 + marginX; hitX = true; }
@@ -553,62 +466,42 @@ function keepBallInsideScreen() {
       ndcRaycaster.ray.intersectPlane(zPlane, newPos);
       ballState.position.copy(newPos);
   }
-}
-
-// ============================================================
-//  主逻辑（石头：无弹跳，落回地面即静止）
-// ============================================================
-function updateLogic(deltaTime) {
+}function updateLogic(deltaTime) {
   if (!ballLoaded) return;
   if (ballState.releaseCooldown > 0) ballState.releaseCooldown -= deltaTime;
   
   const activeHand = getActiveHand();
   let debugStr = "无手";
 
-  // 抓取状态
   if (ballState.isHeld) {
     ballState.angularVelocity.set(0, 0, 0);
-    
     if (!activeHand) {
-      ballState.isHeld = false;
-      ballState.isFalling = true;
-      ballState.isResting = false;
-      ballState.velocity.set(0, 0, 0);
-      ballState.releaseCooldown = 0.8;
+      ballState.isHeld = false; ballState.isFalling = true; ballState.isResting = false;
+      ballState.velocity.set(0, 0, 0); ballState.releaseCooldown = 0.5; ballState.bounceCount = 0;
       debugStr = "手离开-掉落";
     } else {
       if (isHandOpen(activeHand)) {
-        ballState.isHeld = false;
-        ballState.isFalling = true;
-        ballState.isResting = false;
-        ballState.velocity.set(0, 0, 0);
-        ballState.releaseCooldown = 0.8;
-        debugStr = "松手掉落";
+        ballState.isHeld = false; ballState.isFalling = true; ballState.isResting = false;
+        ballState.velocity.set(0, 0, 0); ballState.releaseCooldown = 0.5; ballState.bounceCount = 0;
+        debugStr = "松手砸下";
       } else {
         const targetPos = getGrabTargetWorldPos(activeHand);
-        if (targetPos) {
-          ballState.position.copy(targetPos);
-        }
+        if (targetPos) ballState.position.copy(targetPos);
         debugStr = "抓取中";
       }
     }
   } else {
-    // 尝试抓取（只在非冷却时）
     if (activeHand && ballState.releaseCooldown <= 0) {
       const isGrabPose = isFullyGrabbed(activeHand);
       const handVisual = getVisualHandPos(activeHand);
       const ballScreen = getBallScreenPos();
       const screenDist = Math.hypot(handVisual.x - ballScreen.x, handVisual.y - ballScreen.y);
-
       if (isGrabPose) {
         debugStr = "手势正确";
         if (screenDist < CONFIG.GRAB_SCREEN_DIST) {
-          ballState.isHeld = true;
-          ballState.isFalling = false;
-          ballState.isResting = false;
-          ballState.velocity.set(0, 0, 0);
+          ballState.isHeld = true; ballState.isFalling = false; ballState.isResting = false;
+          ballState.velocity.set(0, 0, 0); ballState.bounceCount = 0;
           debugStr = "抓取成功";
-          
           const targetPos = getGrabTargetWorldPos(activeHand);
           if (targetPos) ballState.position.copy(targetPos);
         } else {
@@ -617,49 +510,50 @@ function updateLogic(deltaTime) {
       } else {
         debugStr = "手势未到位";
       }
-    } else if (activeHand) {
-      debugStr = "冷却中";
     }
 
-    // 物理：自由落体，不反弹
     if (!ballState.isHeld) {
       if (!ballState.isResting || ballState.velocity.length() > 0.01) {
         ballState.velocity.y += GRAVITY * deltaTime;
         ballState.position.addScaledVector(ballState.velocity, deltaTime);
         
-        // 石头落地处理：不反弹，直接停住
         if (ballState.position.y <= currentGroundY + ballRadius) {
-          ballState.position.y = currentGroundY + ballRadius;
-          ballState.velocity.set(0, 0, 0);
-          ballState.isResting = true;
-          ballState.isFalling = false;
-          ballState.angularVelocity.multiplyScalar(0.95);
+          ballState.position.y = currentGroundY + ballRadius; 
+          if (ballState.velocity.y < -MIN_VELOCITY && ballState.bounceCount < 2) {
+            ballState.velocity.y = -ballState.velocity.y * RESTITUTION;
+            ballState.bounceCount++;
+            ballState.velocity.x *= 0.8;
+            ballState.angularVelocity.z = (Math.random() - 0.5) * 5;
+            ballState.angularVelocity.x = (Math.random() - 0.5) * 5;
+            debugStr = `弹跳第${ballState.bounceCount}次`;
+          } else {
+            ballState.velocity.set(0, 0, 0);
+            ballState.isResting = true;
+            ballState.isFalling = false;
+            ballState.angularVelocity.multiplyScalar(0.5);
+          }
         }
         
-        // 如果没有静止，受空气阻力影响
         if (ballState.isResting) {
             ballState.velocity.x *= 0.8;
             if (Math.abs(ballState.velocity.x) < 0.1) ballState.velocity.x = 0;
         } else {
             ballState.velocity.x *= 0.99;
         }
-        
         keepBallInsideScreen();
       }
     }
   }
 
-  // 更新模型位置和旋转
   if (basketball) {
     basketball.position.copy(ballState.position);
     if (!ballState.isHeld && ballState.angularVelocity.length() > 0.01) {
       basketball.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), ballState.angularVelocity.z * deltaTime);
       basketball.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), ballState.angularVelocity.x * deltaTime);
-      ballState.angularVelocity.multiplyScalar(0.99);
+      ballState.angularVelocity.multiplyScalar(0.98);
     }
   }
   
-  // 更新影子
   if (shadowMesh) {
     const height = Math.max(ballState.position.y - (currentGroundY + ballRadius), 0);
     const t = Math.min(height / 5, 1);
@@ -668,21 +562,21 @@ function updateLogic(deltaTime) {
     shadowMesh.scale.set(currentScale, currentScale, 1);
     shadowMesh.position.x = ballState.position.x;
     shadowMesh.position.z = ballState.position.z;
-    const baseBlur = 0.6;
-    shadowMaterial.opacity = Math.max(baseBlur * (1 - t * 0.8), 0.05);
+    shadowMaterial.opacity = Math.max(0.6 * (1 - t * 0.8), 0.05);
   }
 
   return debugStr;
 }
 
 // ============================================================
-//  绘制手部骨架
+//  UI与交互逻辑
 // ============================================================
 let showSkeleton = false;
 document.getElementById('toggleSkeleton').onclick = function() {
   showSkeleton = !showSkeleton;
   this.textContent = showSkeleton ? '骨架 ON' : '骨架 OFF';
 };
+
 function drawSkeleton(lms, isRight) {
   if (!lms) return;
   const strokeColor = isRight ? '#00ff44' : '#00d4ff';
@@ -709,16 +603,17 @@ function drawSkeleton(lms, isRight) {
     const P = nToC(p.x, p.y);
     if (HIGHLIGHT_POINTS.includes(idx)) {
       const label = `${idx} ${KP_NAMES[idx]}`;
-      ctx.font = `bold 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+      ctx.font = `bold 12px ui-monospace, monospace`;
       const textW = ctx.measureText(label).width;
       const padX = 6, boxH = 20, offsetX = 10;
       ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH, 4) : ctx.rect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH); ctx.fill();
+      if (ctx.roundRect) ctx.beginPath(), ctx.roundRect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH, 4), ctx.fill();
+      else ctx.fillRect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH);
       ctx.strokeStyle = isRight ? 'rgba(0, 255, 68, 0.4)' : 'rgba(0, 212, 255, 0.4)'; ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.fillText(label, P.x + offsetX + padX, P.y);
     } else {
       const label = `${idx}`;
-      ctx.font = `bold 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+      ctx.font = `bold 11px ui-monospace, monospace`;
       const tx = P.x + 6, ty = P.y - 6;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeText(label, tx, ty);
       ctx.fillStyle = '#ffffff'; ctx.fillText(label, tx, ty);
@@ -726,9 +621,6 @@ function drawSkeleton(lms, isRight) {
   }
 }
 
-// ============================================================
-//  主循环
-// ============================================================
 let lastFpsTime = performance.now(), framesSinceFps = 0, fps = 0, lastFrameTime = performance.now();
 function loop() {
   try {
@@ -743,18 +635,17 @@ function loop() {
     }
     
     const debugState = updateLogic(deltaTime) || "";
-    
     renderer.render(scene, camera);
+    
     framesSinceFps++;
     if (now - lastFpsTime >= 1000) { fps = framesSinceFps; framesSinceFps = 0; lastFpsTime = now; }
-    
-    const ballStatus = ballState.isHeld ? '🪨抓取中' : (ballState.isFalling ? '⬇️下落' : '⏸️静止');
-    
+    const ballStatus = ballState.isHeld ? '🪨抓取中' : (ballState.isFalling ? '⬇️下落/弹跳' : '⏸️静止');
     statusEl.textContent = `📱 ${fps}fps · ${debugState} · ${ballStatus}`;
     if (handSlots.right.lms || handSlots.left.lms) hintEl.style.opacity = '0';
   } catch (err) { console.error('loop error:', err); }
   requestAnimationFrame(loop);
 }
+
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -763,101 +654,51 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize);
 
-// ============================================================
-//  参数面板交互逻辑
-// ============================================================
-const vCameraY = document.getElementById('vCameraY');
-const vLookAtY = document.getElementById('vLookAtY');
-const vCameraZ = document.getElementById('vCameraZ');
-const vModelScale = document.getElementById('vModelScale');
-const vGridOpacity = document.getElementById('vGridOpacity');
+// 参数面板交互
+const vCameraY = document.getElementById('vCameraY'), sCameraY = document.getElementById('sCameraY');
+const vLookAtY = document.getElementById('vLookAtY'), sLookAtY = document.getElementById('sLookAtY');
+const vCameraZ = document.getElementById('vCameraZ'), sCameraZ = document.getElementById('sCameraZ');
+const vModelScale = document.getElementById('vModelScale'), sModelScale = document.getElementById('sModelScale');
+const vGridOpacity = document.getElementById('vGridOpacity'), sGridOpacity = document.getElementById('sGridOpacity');
 
-const sCameraY = document.getElementById('sCameraY');
-const sLookAtY = document.getElementById('sLookAtY');
-const sCameraZ = document.getElementById('sCameraZ');
-const sModelScale = document.getElementById('sModelScale');
-const sGridOpacity = document.getElementById('sGridOpacity');
-
-// 滑块更新事件
-sCameraY.addEventListener('input', (e) => {
-  cameraY = parseFloat(e.target.value);
-  vCameraY.textContent = cameraY.toFixed(1);
-  updateCamera();
-});
-sLookAtY.addEventListener('input', (e) => {
-  lookAtY = parseFloat(e.target.value);
-  vLookAtY.textContent = lookAtY.toFixed(1);
-  updateCamera();
-});
-sCameraZ.addEventListener('input', (e) => {
-  cameraZ = parseFloat(e.target.value);
-  vCameraZ.textContent = cameraZ.toFixed(1);
-  updateCamera();
-});
+sCameraY.addEventListener('input', (e) => { cameraY = parseFloat(e.target.value); vCameraY.textContent = cameraY.toFixed(1); updateCamera(); });
+sLookAtY.addEventListener('input', (e) => { lookAtY = parseFloat(e.target.value); vLookAtY.textContent = lookAtY.toFixed(1); updateCamera(); });
+sCameraZ.addEventListener('input', (e) => { cameraZ = parseFloat(e.target.value); vCameraZ.textContent = cameraZ.toFixed(1); updateCamera(); });
 sModelScale.addEventListener('input', (e) => {
-  modelScale = parseFloat(e.target.value);
-  vModelScale.textContent = modelScale.toFixed(2);
+  modelScale = parseFloat(e.target.value); vModelScale.textContent = modelScale.toFixed(2);
   if (basketball) {
-    // 重新计算大小
     basketball.scale.setScalar(modelScale);
-    // 重新计算半径并重置位置，防止陷地或悬空
     const box = new THREE.Box3().setFromObject(basketball);
-    const size = box.getSize(new THREE.Vector3());
-    ballRadius = Math.max(size.x, size.y, size.z) * 0.5;
-    if (ballState.isResting) {
-      ballState.position.y = currentGroundY + ballRadius;
-      basketball.position.copy(ballState.position);
-    }
+    ballRadius = Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z) * 0.5;
+    if (ballState.isResting) { ballState.position.y = currentGroundY + ballRadius; basketball.position.copy(ballState.position); }
   }
 });
-sGridOpacity.addEventListener('input', (e) => {
-  gridOpacity = parseFloat(e.target.value);
-  vGridOpacity.textContent = gridOpacity.toFixed(2);
-  gridHelper.material.opacity = gridOpacity;
-});
+sGridOpacity.addEventListener('input', (e) => { gridOpacity = parseFloat(e.target.value); vGridOpacity.textContent = gridOpacity.toFixed(2); gridHelper.material.opacity = gridOpacity; });
 
-// 复制参数按钮
 document.getElementById('copyParams').addEventListener('click', () => {
-  const paramStr = `cameraY: ${cameraY.toFixed(2)},\nlookAtY: ${lookAtY.toFixed(2)},\ncameraZ: ${cameraZ.toFixed(2)},\nmodelScale: ${modelScale.toFixed(2)},\ngridOpacity: ${gridOpacity.toFixed(2)}`;
-  navigator.clipboard.writeText(paramStr).then(() => {
-    const btn = document.getElementById('copyParams');
-    const originalText = btn.textContent;
-    btn.textContent = '✅ 已复制';
-    setTimeout(() => { btn.textContent = originalText; }, 1500);
-  }).catch(err => {
-    console.error('复制失败:', err);
-    alert('复制失败，请手动复制参数：\n' + paramStr);
-  });
+  const str = `cameraY: ${cameraY.toFixed(2)}, lookAtY: ${lookAtY.toFixed(2)}, cameraZ: ${cameraZ.toFixed(2)}, modelScale: ${modelScale.toFixed(2)}, gridOpacity: ${gridOpacity.toFixed(2)}`;
+  navigator.clipboard.writeText(str).then(() => {
+    const btn = document.getElementById('copyParams'); const old = btn.textContent;
+    btn.textContent = '✅ 已复制'; setTimeout(() => btn.textContent = old, 1500);
+  }).catch(() => alert('复制失败:\n' + str));
 });
 
-// 重置按钮
 document.getElementById('resetParams').addEventListener('click', () => {
   cameraY = -1.7; lookAtY = 0; cameraZ = 10; modelScale = 1.0; gridOpacity = 0.4;
-  
   sCameraY.value = cameraY; vCameraY.textContent = cameraY.toFixed(1);
   sLookAtY.value = lookAtY; vLookAtY.textContent = lookAtY.toFixed(1);
   sCameraZ.value = cameraZ; vCameraZ.textContent = cameraZ.toFixed(1);
   sModelScale.value = modelScale; vModelScale.textContent = modelScale.toFixed(2);
   sGridOpacity.value = gridOpacity; vGridOpacity.textContent = gridOpacity.toFixed(2);
-  
-  updateCamera();
-  gridHelper.material.opacity = gridOpacity;
-  
+  updateCamera(); gridHelper.material.opacity = gridOpacity;
   if (basketball) {
     basketball.scale.setScalar(modelScale);
     const box = new THREE.Box3().setFromObject(basketball);
-    const size = box.getSize(new THREE.Vector3());
-    ballRadius = Math.max(size.x, size.y, size.z) * 0.5;
-    if (ballState.isResting) {
-      ballState.position.y = currentGroundY + ballRadius;
-      basketball.position.copy(ballState.position);
-    }
+    ballRadius = Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z) * 0.5;
+    if (ballState.isResting) { ballState.position.y = currentGroundY + ballRadius; basketball.position.copy(ballState.position); }
   }
 });
 
-// ============================================================
-//  启动
-// ============================================================
 (async () => {
   await initCamera();
   loop();
