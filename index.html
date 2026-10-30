@@ -3,148 +3,623 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>极简 AR 立方体</title>
+<title>真实 AR 平面放置 · 手势抓取模型</title>
 <style>
-  body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-  #canvas { width: 100vw; height: 100vh; display: block; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #000; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff;
+    -webkit-user-select: none; user-select: none; touch-action: none; }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+
+  #video, #canvas, #three-canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+
+  #video { z-index: 1; }
+  #three-canvas { z-index: 2; pointer-events: none; }
+  #canvas { z-index: 3; pointer-events: none; }
+  #ar-overlay { position: absolute; inset: 0; z-index: 4; }
+
+  #status {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: rgba(255,255,255,0.9); letter-spacing: 0.05em;
+    z-index: 10; padding: 6px 14px; background: rgba(0,0,0,0.65); border-radius: 999px;
+    white-space: nowrap; font-family: ui-monospace, monospace;
+    pointer-events: none;
+  }
   #hint {
-    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-    color: white; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 20px;
-    font-size: 14px; pointer-events: none; text-align: center; z-index: 10; display: none;
+    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+    padding: 10px 22px; background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
+    font-size: 13px; color: rgba(255,255,255,0.85);
+    transition: opacity 0.6s; z-index: 10; text-align: center; white-space: nowrap;
+    pointer-events: none;
   }
-  #overlay {
-    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-    background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100;
+  .btn {
+    position: absolute;
+    padding: 7px 14px; background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
+    font-size: 11px; color: rgba(255,255,255,0.9); cursor: pointer;
+    z-index: 10; user-select: none; white-space: nowrap;
   }
-  #overlay h1 { color: #fff; margin-bottom: 10px; }
-  #overlay p { color: #aaa; margin-bottom: 30px; text-align: center; padding: 0 20px; font-size: 14px;}
+  .btn:active { background: rgba(255,255,255,0.25); }
+
+  #resetBtn { top: 20px; left: 16px; display: none; }
+  #debugBtn { top: 20px; right: 100px; background: rgba(255, 100, 0, 0.3); border-color: rgba(255, 100, 0, 0.5); }
+  #toggleSkeleton { top: 20px; right: 16px; }
+
+  #debugPanel {
+    position: absolute; top: 60px; right: 16px; z-index: 50;
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
+    padding: 16px; width: 280px;
+    display: none; flex-direction: column; gap: 12px;
+  }
+  .debug-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .debug-row input[type="range"] { width: 120px; }
+  #debugOutput {
+    background: #000; padding: 8px; border-radius: 6px; font-family: monospace; font-size: 11px;
+    color: #4ade80; white-space: pre-wrap; word-break: break-all; user-select: text; margin-top: 5px;
+  }
+
+  #reticle {
+    position: absolute; top: 50%; left: 50%;
+    width: 60px; height: 60px; margin-left: -30px; margin-top: -30px;
+    border: 2px solid rgba(255,255,255,0.45); border-radius: 50%;
+    z-index: 6; pointer-events: none; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.04); transition: all 0.2s;
+  }
+  #reticle.active { border-color: #4ade80; background: rgba(74,222,128,0.12); transform: scale(1.08); }
+
+  #startOverlay {
+    position: absolute; inset: 0; z-index: 100;
+    background: radial-gradient(circle at 50% 35%, #1a1030, #000 75%);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .start-card {
+    max-width: 340px; width: 100%; text-align: center; padding: 28px 24px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 22px; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .start-card h1 { font-size: 21px; font-weight: 700; margin-bottom: 12px; }
+  .start-card p { font-size: 13px; line-height: 1.65; color: rgba(255,255,255,0.72); margin-bottom: 20px; }
   #startBtn {
-    padding: 15px 40px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px;
-    background: #4ade80; color: #000; cursor: pointer; transition: 0.3s;
+    width: 100%; padding: 14px 0; font-size: 15px; font-weight: 700; color: #0a0a0a;
+    background: linear-gradient(135deg, #a7f3d0, #6ee7b7); border: none; border-radius: 14px; cursor: pointer;
   }
-  #startBtn:disabled { background: #666; color: #aaa; cursor: not-allowed; }
-  #errorText { color: #ff4d4d; margin-top: 20px; text-align: center; padding: 0 20px; font-size: 14px; line-height: 1.5; }
+
+  #copyParamsBtn {
+    width: 100%; padding: 8px 0; font-size: 12px; font-weight: 600;
+    color: #0a0a0a; background: linear-gradient(135deg, #fde68a, #fbbf24);
+    border: none; border-radius: 8px; cursor: pointer; margin-top: 4px;
+  }
+  #copyParamsBtn:active { opacity: 0.7; }
 </style>
 </head>
 <body>
+<div id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="three-canvas"></canvas>
+  <canvas id="canvas"></canvas>
+  <div id="ar-overlay"></div>
+  <div id="reticle"></div>
 
-<canvas id="canvas"></canvas>
-<div id="hint">移动手机扫描桌面... 出现绿圈后点击屏幕</div>
+  <div id="status">正在初始化...</div>
+  <div id="hint">将手机对准桌面 · 点击屏幕放置模型</div>
 
-<div id="overlay">
-  <h1>极简 AR 体验</h1>
-  <p>请确保手机已安装 AR 服务，并开启了网络工具。</p>
-  <button id="startBtn">启动 AR</button>
-  <div id="errorText"></div>
+  <div class="btn" id="resetBtn">↺ 重新放置</div>
+  <div class="btn" id="debugBtn">⚙️ 参数调整</div>
+  <div class="btn" id="toggleSkeleton">骨架 OFF</div>
+
+  <div id="debugPanel">
+    <div class="debug-row">
+      <span>相机高度 (Y)</span>
+      <input type="range" id="camYSlider" min="-3.0" max="3.0" step="0.1" value="0.0">
+      <span id="camYVal">0.0</span>
+    </div>
+    <div class="debug-row">
+      <span>相机俯角</span>
+      <input type="range" id="camPitchSlider" min="-90" max="90" step="1" value="0">
+      <span id="camPitchVal">0°</span>
+    </div>
+    <div class="debug-row">
+      <span>视场角 FOV</span>
+      <input type="range" id="fovSlider" min="30" max="110" step="1" value="60">
+      <span id="fovVal">60°</span>
+    </div>
+    <div class="debug-row">
+      <span>地面高度 (Y)</span>
+      <input type="range" id="groundYSlider" min="-5.0" max="0.0" step="0.1" value="-2.0">
+      <span id="groundYVal">-2.0</span>
+    </div>
+    <div class="debug-row">
+      <span>模型缩放</span>
+      <input type="range" id="scaleSlider" min="0" max="10" step="0.01" value="0.27">
+      <span id="scaleVal">0.27</span>
+    </div>
+    <div class="debug-row">
+      <span>抓取屏幕距离</span>
+      <input type="range" id="grabDistSlider" min="0.05" max="0.6" step="0.01" value="0.28">
+      <span id="grabDistVal">0.28</span>
+    </div>
+    <div class="debug-row">
+      <span>握拳阈值</span>
+      <input type="range" id="grabRatioSlider" min="0.8" max="2.5" step="0.05" value="1.6">
+      <span id="grabRatioVal">1.60</span>
+    </div>
+    <div id="debugOutput">const CONFIG = {<br>  SCALE: 0.27,<br>  GROUND_Y: -2.0,<br>  CAMERA_Y: 0.0,<br>  CAMERA_PITCH: 0,<br>  CAMERA_FOV: 60<br>};</div>
+    <button id="copyParamsBtn">📋 复制参数</button>
+  </div>
+
+  <div id="startOverlay">
+    <div class="start-card">
+      <h1>🏢 AR 模型抓取</h1>
+      <p>将手机摄像头向下对准桌面<br>点击屏幕把模型放到桌上<br>然后伸出手，合拢五指把它抓起来</p>
+      <button id="startBtn">开始体验</button>
+    </div>
+  </div>
 </div>
 
+<script src="https://unpkg.com/@mediapipe/hands/hands.js"></script>
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.128.0/build/three.module.js"
+    "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
   }
 }
 </script>
-
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const canvas = document.getElementById('canvas');
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+let CONFIG = {
+  SCALE: 0.27,
+  GROUND_Y: -2.0,
+  CAMERA_Y: 0.0,
+  CAMERA_PITCH: 0,
+  CAMERA_FOV: 60,
+  GRAB_DISTANCE_RATIO: 1.6,
+  RELEASE_DISTANCE_RATIO: 2.0,
+  GRAB_SCREEN_DIST: 0.28,
+};
 
-const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x000000, 0);
-renderer.xr.enabled = true;
+const MODEL_URL = 'https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/building.glb';
 
-const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-light.position.set(0.5, 1, 0.25);
-scene.add(light);
+const video    = document.getElementById('video');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const hintEl   = document.getElementById('hint');
+const threeCanvas = document.getElementById('three-canvas');
+const overlayEl = document.getElementById('ar-overlay');
+const reticleEl = document.getElementById('reticle');
+const resetBtn = document.getElementById('resetBtn');
 
-// 生成一个 20cm 的红色立方体
-const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-const material = new THREE.MeshStandardMaterial({ color: 0xff4d6d, roughness: 0.3 });
-const cube = new THREE.Mesh(geometry, material);
-cube.visible = false;
-scene.add(cube);
+const debugBtn = document.getElementById('debugBtn');
+const debugPanel = document.getElementById('debugPanel');
+const debugOutput = document.getElementById('debugOutput');
 
-// 准星
-const reticle = new THREE.Mesh(
-  new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2),
-  new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-);
-reticle.visible = false;
-reticle.matrixAutoUpdate = false;
-scene.add(reticle);
-
-let hitTestSource = null;
-let localSpace = null;
-
-// 点击放置
-canvas.addEventListener('pointerdown', () => {
-  if (reticle.visible) {
-    cube.position.setFromMatrixPosition(reticle.matrix);
-    cube.visible = true;
-    reticle.visible = false;
-    document.getElementById('hint').innerText = '放置成功！';
-    setTimeout(() => document.getElementById('hint').style.display = 'none', 3000);
-  }
+debugBtn.addEventListener('click', () => {
+  debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
 });
 
-// 启动 AR
-document.getElementById('startBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('startBtn');
-  const errText = document.getElementById('errorText');
-  
-  btn.textContent = '正在启动...';
-  btn.disabled = true;
-  errText.innerHTML = '';
+function buildConfigText() {
+  return `const CONFIG = {
+  SCALE: ${CONFIG.SCALE.toFixed(2)},
+  GROUND_Y: ${CONFIG.GROUND_Y.toFixed(1)},
+  CAMERA_Y: ${CONFIG.CAMERA_Y.toFixed(1)},
+  CAMERA_PITCH: ${CONFIG.CAMERA_PITCH.toFixed(0)},
+  CAMERA_FOV: ${CONFIG.CAMERA_FOV.toFixed(0)},
+  GRAB_DISTANCE_RATIO: ${CONFIG.GRAB_DISTANCE_RATIO.toFixed(2)},
+  RELEASE_DISTANCE_RATIO: ${CONFIG.RELEASE_DISTANCE_RATIO.toFixed(2)},
+  GRAB_SCREEN_DIST: ${CONFIG.GRAB_SCREEN_DIST.toFixed(2)}
+};`;
+}
 
-  if (!navigator.xr) {
-    errText.innerHTML = '当前浏览器不支持 WebXR。<br>请换用 Chrome 或 Edge。';
-    btn.textContent = '启动失败'; btn.disabled = false;
-    return;
-  }
+function updateOutput() {
+  const text = buildConfigText();
+  debugOutput.innerHTML = text.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+}
 
+document.getElementById('copyParamsBtn').addEventListener('click', async () => {
+  const text = buildConfigText();
   try {
-    // 极其精简的配置，只要 hit-test
-    const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test']
-    });
-    
-    await renderer.xr.setSession(session);
-    
-    document.getElementById('overlay').style.display = 'none';
-    document.getElementById('hint').style.display = 'block';
-
-    localSpace = await session.requestReferenceSpace('local');
-    const viewerSpace = await session.requestReferenceSpace('viewer');
-    
-    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-
-    renderer.setAnimationLoop((time, frame) => {
-      if (frame && hitTestSource) {
-        const results = frame.getHitTestResults(hitTestSource);
-        if (results.length > 0) {
-          const pose = results[0].getPose(localSpace);
-          reticle.visible = true;
-          reticle.matrix.fromArray(pose.transform.matrix);
-        } else {
-          reticle.visible = false;
-        }
-      }
-      renderer.render(scene, camera);
-    });
-
-  } catch (error) {
-    console.error(error);
-    errText.innerHTML = `启动失败，原因：<br><span style="color:#ffaa00">${error.message}</span><br><br>如果是 iOS，说明苹果屏蔽了第三方浏览器的底层 AR。<br>如果是安卓，请检查梯子和 ARCore 服务。`;
-    btn.textContent = '重新尝试';
-    btn.disabled = false;
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById('copyParamsBtn');
+    const old = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    document.body.removeChild(ta);
+    const btn = document.getElementById('copyParamsBtn');
+    const old = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    setTimeout(() => { btn.textContent = old; }, 1200);
   }
 });
-</script>
-</body>
-</html>
+
+document.getElementById('camYSlider').addEventListener('input', (e) => { CONFIG.CAMERA_Y = parseFloat(e.target.value); document.getElementById('camYVal').innerText = CONFIG.CAMERA_Y.toFixed(1); updateOutput(); });
+document.getElementById('camPitchSlider').addEventListener('input', (e) => { CONFIG.CAMERA_PITCH = parseFloat(e.target.value); document.getElementById('camPitchVal').innerText = CONFIG.CAMERA_PITCH + '°'; updateOutput(); });
+document.getElementById('fovSlider').addEventListener('input', (e) => { CONFIG.CAMERA_FOV = parseFloat(e.target.value); document.getElementById('fovVal').innerText = CONFIG.CAMERA_FOV + '°'; camera.fov = CONFIG.CAMERA_FOV; camera.updateProjectionMatrix(); updateOutput(); });
+document.getElementById('groundYSlider').addEventListener('input', (e) => { CONFIG.GROUND_Y = parseFloat(e.target.value); document.getElementById('groundYVal').innerText = CONFIG.GROUND_Y.toFixed(1); gridHelper.position.y = CONFIG.GROUND_Y; updateOutput(); });
+document.getElementById('scaleSlider').addEventListener('input', (e) => {
+  CONFIG.SCALE = parseFloat(e.target.value);
+  document.getElementById('scaleVal').innerText = CONFIG.SCALE.toFixed(2);
+  if (flowerObj) {
+    const box1 = new THREE.Box3().setFromObject(flowerObj);
+    const s1 = box1.getSize(new THREE.Vector3());
+    const max1 = Math.max(s1.x, s1.y, s1.z) || 1;
+    const k = CONFIG.SCALE / max1;
+    flowerObj.scale.setScalar(k);
+    const box2 = new THREE.Box3().setFromObject(flowerObj);
+    const s2 = box2.getSize(new THREE.Vector3());
+    objRadius = Math.max(s2.x, s2.y, s2.z) * 0.5;
+  }
+  updateOutput();
+});
+document.getElementById('grabDistSlider').addEventListener('input', (e) => {
+  CONFIG.GRAB_SCREEN_DIST = parseFloat(e.target.value);
+  document.getElementById('grabDistVal').innerText = CONFIG.GRAB_SCREEN_DIST.toFixed(2);
+  updateOutput();
+});
+document.getElementById('grabRatioSlider').addEventListener('input', (e) => {
+  CONFIG.GRAB_DISTANCE_RATIO = parseFloat(e.target.value);
+  document.getElementById('grabRatioVal').innerText = CONFIG.GRAB_DISTANCE_RATIO.toFixed(2);
+  updateOutput();
+});
+updateOutput();
+
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const VIDEO_W = IS_MOBILE ? 640 : 1280;
+const VIDEO_H = IS_MOBILE ? 480 : 720;
+const MP_W = 160; const MP_H = 120;
+
+const HIGHLIGHT_POINTS = [4, 8, 12, 16, 20, 0];
+const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+let layout = { offsetX: 0, offsetY: 0, drawW: 1, drawH: 1 };
+function updateLayout() {
+  const vw = video.videoWidth || VIDEO_W, vh = video.videoHeight || VIDEO_H;
+  const cssW = window.innerWidth, cssH = window.innerHeight;
+  const DPR = window.devicePixelRatio || 1;
+  if (canvas.width !== cssW * DPR || canvas.height !== cssH * DPR) {
+    canvas.width = cssW * DPR; canvas.height = cssH * DPR;
+  }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const videoAspect = vw / vh, displayAspect = cssW / cssH;
+  let drawW, drawH, offsetX, offsetY;
+  if (displayAspect > videoAspect) {
+    drawW = cssW; drawH = cssW / videoAspect; offsetX = 0; offsetY = (cssH - drawH) / 2;
+  } else {
+    drawH = cssH; drawW = cssH * videoAspect; offsetX = (cssW - drawW) / 2; offsetY = 0;
+  }
+  layout = { offsetX, offsetY, drawW, drawH };
+}
+window.addEventListener('resize', () => { updateLayout(); onWindowResize(); });
+window.addEventListener('orientationchange', () => setTimeout(() => { updateLayout(); onWindowResize(); }, 250));
+
+function nToC(nx, ny) {
+  return { x: layout.offsetX + nx * layout.drawW, y: layout.offsetY + ny * layout.drawH };
+}
+
+const mpCanvas = document.createElement('canvas');
+mpCanvas.width = MP_W; mpCanvas.height = MP_H;
+const mpCtx = mpCanvas.getContext('2d', { alpha: false });
+const handSlots = { right: { lms: null }, left: { lms: null } };
+
+function getHandCenter(lms) { return { x: (lms[0].x + lms[9].x) / 2, y: (lms[0].y + lms[9].y) / 2 }; }
+
+function processHands(results) {
+  const lmsArr = results.multiHandLandmarks || [];
+  let rightDet = null, leftDet = null;
+  if (lmsArr.length >= 2) {
+    const sorted = [...lmsArr].sort((a, b) => getHandCenter(a).x - getHandCenter(b).x);
+    rightDet = sorted[0]; leftDet = sorted[1];
+  } else if (lmsArr.length === 1) {
+    const lms = lmsArr[0], c = getHandCenter(lms);
+    if (c.x < 0.5) rightDet = lms; else leftDet = lms;
+  }
+  handSlots.right.lms = rightDet;
+  handSlots.left.lms = leftDet;
+}
+
+let handsInstance = null, mpBusy = false, lastMpTime = 0, mpReady = false;
+async function initHands() {
+  if (typeof Hands === 'undefined') return;
+  const hands = new Hands({ locateFile: (f) => `https://unpkg.com/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.4, selfieMode: false });
+  hands.onResults((r) => processHands(r));
+  try { await hands.initialize(); handsInstance = hands; mpReady = true; } catch (e) { console.error(e); }
+}
+
+function pumpMP() {
+  if (mpBusy || !mpReady || video.readyState < 2) return;
+  const now = performance.now();
+  if (now - lastMpTime < 66) return;
+  mpBusy = true; lastMpTime = now;
+  mpCtx.drawImage(video, 0, 0, MP_W, MP_H);
+  handsInstance.send({ image: mpCanvas }).then(() => { mpBusy = false; }).catch(() => { mpBusy = false; });
+}
+
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: VIDEO_W }, height: { ideal: VIDEO_H } }, audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    if (video.videoWidth) updateLayout();
+    video.addEventListener('loadedmetadata', updateLayout);
+    return true;
+  } catch (e) {
+    statusEl.textContent = '摄像头失败：' + e.name;
+    return false;
+  }
+}
+
+// ================= WebXR / SLAM =================
+let xrSession = null, xrRefSpace = null, hitTestSource = null;
+let xrSupported = false;
+let xrHitMatrix = null, xrHitValid = false;
+let xrActive = false;
+
+async function initWebXR() {
+  if (!navigator.xr) return false;
+  try { xrSupported = await navigator.xr.isSessionSupported('immersive-ar'); }
+  catch (e) { xrSupported = false; }
+  return xrSupported;
+}
+
+async function startXRSession() {
+  if (!xrSupported) return false;
+  try {
+    xrSession = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test', 'local-floor'],
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: document.getElementById('stage') }
+    });
+  } catch (e) {
+    console.warn('WebXR 会话启动失败:', e);
+    return false;
+  }
+
+  renderer.xr.enabled = true;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  await renderer.xr.setSession(xrSession);
+
+  xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+  const viewerSpace = await xrSession.requestReferenceSpace('viewer');
+  hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+
+  video.style.display = 'none';
+  threeCanvas.style.display = 'block';
+  xrActive = true;
+
+  xrSession.addEventListener('end', () => {
+    xrSession = null;
+    hitTestSource = null;
+    renderer.xr.enabled = false;
+    video.style.display = 'block';
+    xrActive = false;
+    enterPlacingMode();
+  });
+
+  return true;
+}
+
+function updateXRHitTest(frame) {
+  if (!hitTestSource || !frame) return;
+  const hitResults = frame.getHitTestResults(hitTestSource);
+  if (hitResults.length > 0) {
+    const pose = hitResults[0].getPose(xrRefSpace);
+    if (pose) {
+      xrHitMatrix = pose.transform.matrix;
+      xrHitValid = true;
+      return;
+    }
+  }
+  xrHitValid = false;
+  xrHitMatrix = null;
+}
+
+function getXRHitPoint() {
+  if (!xrHitValid || !xrHitMatrix) return null;
+  const m = new THREE.Matrix4().fromArray(xrHitMatrix);
+  return new THREE.Vector3().setFromMatrixPosition(m);
+}
+// =================================================
+
+// Three.js
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(CONFIG.CAMERA_FOV, window.innerWidth / window.innerHeight, 0.05, 200);
+const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.xr.enabled = false;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.5));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+dirLight.position.set(5, 10, 7);
+scene.add(dirLight);
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+const gridHelper = new THREE.GridHelper(10, 10, 0x00ff00, 0x444444);
+gridHelper.position.y = CONFIG.GROUND_Y;
+gridHelper.visible = false;
+scene.add(gridHelper);
+
+const ringGeo = new THREE.RingGeometry(0.08, 0.11, 32);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+const hitRing = new THREE.Mesh(ringGeo, ringMat);
+hitRing.rotation.x = -Math.PI / 2;
+hitRing.visible = false;
+scene.add(hitRing);
+
+let gyroReady = false;
+let baseQuat = new THREE.Quaternion();
+
+function onDeviceOrientation(e) {
+  if (e.alpha === null || e.beta === null || e.gamma === null) return;
+  const alpha = THREE.MathUtils.degToRad(e.alpha);
+  const beta  = THREE.MathUtils.degToRad(e.beta);
+  const gamma = THREE.MathUtils.degToRad(e.gamma);
+  const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+  baseQuat.setFromEuler(euler);
+  baseQuat.multiply(new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)));
+  let angle = 0;
+  if (screen.orientation && typeof screen.orientation.angle === 'number') angle = screen.orientation.angle;
+  else if (typeof window.orientation === 'number') angle = window.orientation;
+  baseQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -THREE.MathUtils.degToRad(angle)));
+  gyroReady = true;
+}
+
+function createShadowTexture() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  const ct = c.getContext('2d');
+  const gradient = ct.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, 'rgba(0, 0, 0, 0.9)');
+  gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.5)');
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ct.fillStyle = gradient; ct.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const shadowMaterial = new THREE.MeshBasicMaterial({ map: createShadowTexture(), transparent: true, opacity: 0.6, depthWrite: false });
+const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMaterial);
+shadowMesh.rotation.x = -Math.PI / 2;
+shadowMesh.position.y = CONFIG.GROUND_Y + 0.01;
+shadowMesh.visible = false;
+scene.add(shadowMesh);
+
+const raycaster = new THREE.Raycaster();
+const tmpHit = new THREE.Vector3();
+const tmpNdc = new THREE.Vector2();
+
+function screenToGround(clientX, clientY) {
+  tmpNdc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(tmpNdc, camera);
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -CONFIG.GROUND_Y);
+  const hitPoint = new THREE.Vector3();
+  const ok = raycaster.ray.intersectPlane(groundPlane, hitPoint);
+  if (!ok) return null;
+  const dist = hitPoint.distanceTo(camera.position);
+  if (dist > 0.1 && dist < 30) {
+    if (hitPoint.y < CONFIG.GROUND_Y - 5) return null;
+    return hitPoint.clone();
+  }
+  return null;
+}
+
+const GRAVITY = -2.8;
+const AIR_DRAG_Y = 0.9;
+const AIR_DRAG_X = 1.2;
+const BOUNCE_RESTITUTION = 0.35;
+const MAX_BOUNCE_COUNT = 2;
+const MIN_BOUNCE_SPEED = 0.4;
+
+const objState = {
+  position: new THREE.Vector3(0, CONFIG.GROUND_Y, -2),
+  velocity: new THREE.Vector3(0, 0, 0),
+  isHeld: false,
+  isFalling: false,
+  isResting: true,
+  releaseCooldown: 0,
+  bounceCount: 0,
+  wobbleTime: 0
+};
+let flowerObj = null, objRadius = 0.1, modelLoaded = false;
+let modelVisible = false;
+let placingMode = true;
+const grabPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+let currentObjGroup = null;
+
+// ★ 删除内置占位模型，只加载 building.glb
+
+function setupObject(obj) {
+  if (currentObjGroup) {
+    scene.remove(currentObjGroup);
+    currentObjGroup.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+        else child.material.dispose();
+      }
+    });
+    currentObjGroup = null;
+  }
+
+  flowerObj = obj;
+  const box = new THREE.Box3().setFromObject(flowerObj);
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const k = CONFIG.SCALE / maxDim;
+  flowerObj.scale.setScalar(k);
+
+  const box2 = new THREE.Box3().setFromObject(flowerObj);
+  const center2 = box2.getCenter(new THREE.Vector3());
+  flowerObj.position.sub(center2);
+
+  const objGroup = new THREE.Group();
+  objGroup.add(flowerObj);
+  objGroup.visible = false;
+  scene.add(objGroup);
+
+  currentObjGroup = objGroup;
+  flowerObj = objGroup;
+
+  const box3 = new THREE.Box3().setFromObject(flowerObj);
+  const size3 = box3.getSize(new THREE.Vector3());
+  objRadius = Math.max(size3.x, size3.y, size3.z) * 0.5;
+  modelLoaded = true;
+}
+
+// ★ 只加载你的模型，不创建任何占位模型
+statusEl.textContent = '正在加载 building.glb...';
+
+const loader = new GLTFLoader();
+loader.load(
+  MODEL_URL,
+  (gltf) => {
+    setupObject(gltf.scene);
+    statusEl.textContent = 'building.glb 加载成功';
+  },
+  (xhr) => {
+    if (xhr.total > 0) statusEl.textContent = `加载 building.glb ${Math.round((xhr.loaded / xhr.total) * 100)}%`;
+  },
+  (err) => {
+    console.error('building.glb 加载失败:', err);
+    statusEl.textContent = 'building.glb 加载失败，请检查链接';
+  }
+);
+
+function getActiveHand() { return handSlots.right.lms || handSlots.left.lms || null; }
+function getPalmPoint(lms) { return lms[9]; }
+function getPalmSize(lms) { return Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1; }
+
+function isFullyGrabbed(lms) {
+  if (!lms) return false;
+  const p = getPalmSize(lms);
+  const wrist = lms[0];
+  const tips = [4, 8, 12, 16, 20];
+  let closedCount = 0;
+  for (const idx of tips) {
+    const tip = lms[idx];
+    const d = Math.hypot(tip.x - wrist.x, tip.y - wrist.y) / p;
+    if (d < CONFIG.GRAB_DISTANCE_RATIO) closedCount++;
+  }
+  return closedCount >= 4;
+}
+
+function isHandOpen(lms) {
+  if (!lms) return true;
+  const p = getPalmSize(lms);
+  const wrist = lms[0];
+  const tips = [8, 
