@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>MediaPipe 手部骨架 + AR石头砸地</title>
+<title>MediaPipe 手部骨架 + AR石头砸地 (后置)</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: #000; overflow: hidden;
@@ -15,7 +15,7 @@
     width: 100%; height: 100%;
     object-fit: cover;
   }
-  #video { z-index: 1; transform: scaleX(-1); }
+  #video { z-index: 1; /* 移除 scaleX(-1)，后置不镜像 */ }
   #canvas { z-index: 2; pointer-events: none; }
   #three-canvas {
     position: absolute; top: 0; left: 0;
@@ -143,22 +143,22 @@
   </div>
   
   <div id="status">正在加载...</div>
-  <div id="hint">将手放入画面 · 伸入石头范围并五指合拢</div>
+  <div id="hint">请对准平面 · 伸入石头范围并五指合拢</div>
   <div class="btn" id="toggleSkeleton">骨架 OFF</div>
 
   <div id="paramPanel">
     <div style="font-size:13px; font-weight:700; letter-spacing:0.04em; margin-bottom:2px;">⚙️ 参数面板</div>
     <div class="param-row">
-      <label>相机高度 (cameraY) <span class="val" id="vCameraY">-1.7</span></label>
-      <input type="range" id="sCameraY" min="-10" max="10" step="0.1" value="-1.7">
+      <label>相机高度 (cameraY) <span class="val" id="vCameraY">4.0</span></label>
+      <input type="range" id="sCameraY" min="-10" max="20" step="0.1" value="4.0">
     </div>
     <div class="param-row">
-      <label>相机角度 (lookAt Y) <span class="val" id="vLookAtY">0</span></label>
-      <input type="range" id="sLookAtY" min="-5" max="5" step="0.1" value="0">
+      <label>相机角度 (lookAt Y) <span class="val" id="vLookAtY">-2.0</span></label>
+      <input type="range" id="sLookAtY" min="-10" max="10" step="0.1" value="-2.0">
     </div>
     <div class="param-row">
-      <label>相机距离 (Z) <span class="val" id="vCameraZ">10</span></label>
-      <input type="range" id="sCameraZ" min="2" max="30" step="0.5" value="10">
+      <label>相机距离 (Z) <span class="val" id="vCameraZ">12.0</span></label>
+      <input type="range" id="sCameraZ" min="2" max="30" step="0.5" value="12.0">
     </div>
     <div class="param-row">
       <label>模型大小 (scale) <span class="val" id="vModelScale">1.0</span></label>
@@ -207,11 +207,11 @@ document.getElementById('guideHead').addEventListener('click', () => {
 });
 
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS|HuaweiBrowser|HonorBrowser|MicroMessenger|WeChat/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
-const VIDEO_W = IS_MOBILE ? 640 : 1280;
-const VIDEO_H = IS_MOBILE ? 480 : 720;
-const MP_W = IS_MOBILE ? 160 : 256;
-const MP_H = IS_MOBILE ? 120 : 192;
-const MP_INTERVAL_MS = IS_MOBILE ? 66 : 33;
+const VIDEO_W = IS_MOBILE ? 1280 : 1280;
+const VIDEO_H = IS_MOBILE ? 720 : 720;
+const MP_W = IS_MOBILE ? 256 : 256;
+const MP_H = IS_MOBILE ? 192 : 192;
+const MP_INTERVAL_MS = IS_MOBILE ? 33 : 33;
 
 const KP_NAMES = ['WRIST','THUMB_CMC','THUMB_MCP','THUMB_IP','THUMB_TIP','INDEX_MCP','INDEX_PIP','INDEX_DIP','INDEX_TIP','MIDDLE_MCP','MIDDLE_PIP','MIDDLE_DIP','MIDDLE_TIP','RING_MCP','RING_PIP','RING_DIP','RING_TIP','PINKY_MCP','PINKY_PIP','PINKY_DIP','PINKY_TIP'];
 const HIGHLIGHT_POINTS = [4, 8, 12, 16, 20, 0];
@@ -237,8 +237,9 @@ function updateLayout() {
 }
 window.addEventListener('resize', updateLayout);
 window.addEventListener('orientationchange', () => setTimeout(updateLayout, 200));
+// 后置摄像头无需镜像坐标转换
 function nToC(nx, ny) {
-  return { x: layout.offsetX + (1 - nx) * layout.drawW, y: layout.offsetY + ny * layout.drawH };
+  return { x: layout.offsetX + nx * layout.drawW, y: layout.offsetY + ny * layout.drawH };
 }
 
 const mpCanvas = document.createElement('canvas');
@@ -269,7 +270,8 @@ function processHands(results) {
 async function initCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: VIDEO_W }, height: { ideal: VIDEO_H } }, audio: false,
+      // 改为 environment 后置摄像头
+      video: { facingMode: 'environment', width: { ideal: VIDEO_W }, height: { ideal: VIDEO_H } }, audio: false,
     });
     video.srcObject = stream;
     await video.play();
@@ -281,6 +283,7 @@ let handsInstance = null, mpBusy = false, lastMpTime = 0, mpReady = false;
 async function initHands() {
   if (typeof Hands === 'undefined') { statusEl.textContent = 'MediaPipe 库加载失败'; return; }
   const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  // 后置摄像头 selfieMode 为 false
   hands.setOptions({ maxNumHands: 2, modelComplexity: IS_MOBILE ? 0 : 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.4, selfieMode: false });
   hands.onResults((r) => processHands(r));
   try { await hands.initialize(); handsInstance = hands; mpReady = true; } catch (e) { console.error(e); statusEl.textContent = 'MediaPipe 初始化失败'; }
@@ -296,7 +299,8 @@ function pumpMP() {
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-let cameraY = -1.7, lookAtY = 0, cameraZ = 10, modelScale = 1.0, gridOpacity = 0.4;
+// 后置 AR 视角：需要从稍微高一点的地方往下看地面
+let cameraY = 4.0, lookAtY = -2.0, cameraZ = 12.0, modelScale = 1.0, gridOpacity = 0.4;
 
 function updateCamera() {
   camera.position.set(0, cameraY, cameraZ);
@@ -309,12 +313,12 @@ const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, ant
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-dirLight.position.set(4, 10, 6);
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(5, 10, 7);
 scene.add(dirLight);
-const fillLight = new THREE.DirectionalLight(0xaaccff, 0.4);
-fillLight.position.set(-4, 5, -4);
+const fillLight = new THREE.DirectionalLight(0xaaccff, 0.5);
+fillLight.position.set(-5, 5, -5);
 scene.add(fillLight);
 
 const groundY = -2.5;
@@ -324,7 +328,7 @@ gridHelper.material.transparent = true;
 gridHelper.material.opacity = gridOpacity;
 scene.add(gridHelper);
 
-const groundPlaneMat = new THREE.MeshBasicMaterial({ color: 0x004466, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
+const groundPlaneMat = new THREE.MeshBasicMaterial({ color: 0x004466, transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false });
 const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), groundPlaneMat);
 groundPlane.rotation.x = -Math.PI / 2;
 groundPlane.position.y = groundY - 0.001;
@@ -401,6 +405,7 @@ loader.load('https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/sto
   statusEl.textContent = '模型加载失败';
 });
 
+// 核心坐标计算（后置无 1-x 翻转）
 function getActiveHand() { return handSlots.right.lms || handSlots.left.lms || null; }
 function getPalmSize(lms) { return Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1; }
 function isFullyGrabbed(lms) {
@@ -416,7 +421,8 @@ function isHandOpen(lms) {
   const distToWrist = (idx) => Math.hypot(lms[idx].x - lms[0].x, lms[idx].y - lms[0].y) / palmSize;
   return distToWrist(8) > CONFIG.RELEASE_DISTANCE_RATIO || distToWrist(12) > CONFIG.RELEASE_DISTANCE_RATIO;
 }
-function getVisualHandPos(lms) { if (!lms) return null; return { x: 1 - lms[12].x, y: lms[12].y }; }
+// 后置无镜像
+function getVisualHandPos(lms) { if (!lms) return null; return { x: lms[12].x, y: lms[12].y }; }
 function getBallScreenPos() {
   const p = ballState.position.clone().project(camera);
   return { x: (1 + p.x) / 2, y: (1 - p.y) / 2 };
@@ -569,7 +575,7 @@ function keepBallInsideScreen() {
 }
 
 // ============================================================
-//  UI与交互逻辑
+//  UI 骨架绘制与主循环
 // ============================================================
 let showSkeleton = false;
 document.getElementById('toggleSkeleton').onclick = function() {
@@ -654,7 +660,9 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize);
 
-// 参数面板交互
+// ============================================================
+// 参数面板交互逻辑
+// ============================================================
 const vCameraY = document.getElementById('vCameraY'), sCameraY = document.getElementById('sCameraY');
 const vLookAtY = document.getElementById('vLookAtY'), sLookAtY = document.getElementById('sLookAtY');
 const vCameraZ = document.getElementById('vCameraZ'), sCameraZ = document.getElementById('sCameraZ');
@@ -684,7 +692,7 @@ document.getElementById('copyParams').addEventListener('click', () => {
 });
 
 document.getElementById('resetParams').addEventListener('click', () => {
-  cameraY = -1.7; lookAtY = 0; cameraZ = 10; modelScale = 1.0; gridOpacity = 0.4;
+  cameraY = 4.0; lookAtY = -2.0; cameraZ = 12.0; modelScale = 1.0; gridOpacity = 0.4;
   sCameraY.value = cameraY; vCameraY.textContent = cameraY.toFixed(1);
   sLookAtY.value = lookAtY; vLookAtY.textContent = lookAtY.toFixed(1);
   sCameraZ.value = cameraZ; vCameraZ.textContent = cameraZ.toFixed(1);
@@ -699,6 +707,7 @@ document.getElementById('resetParams').addEventListener('click', () => {
   }
 });
 
+// 启动
 (async () => {
   await initCamera();
   loop();
