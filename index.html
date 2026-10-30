@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>真实 AR SLAM (iOS XRViewer 专属版)</title>
+<title>真实 AR SLAM 放置</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: #000; overflow: hidden;
@@ -11,21 +11,43 @@
     -webkit-user-select: none; user-select: none; touch-action: none; }
   #stage { position: relative; width: 100vw; height: 100vh; }
   #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
-  
+  #ar-overlay { position: absolute; inset: 0; z-index: 4; }
+
   #status {
-    position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
-    font-size: 12px; color: rgba(255,255,255,0.9);
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: rgba(255,255,255,0.9); letter-spacing: 0.05em;
     z-index: 10; padding: 6px 14px; background: rgba(0,0,0,0.65); border-radius: 999px;
-    white-space: nowrap; font-family: monospace; pointer-events: none;
+    white-space: nowrap; font-family: ui-monospace, monospace; pointer-events: none;
   }
   #hint {
-    position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
     padding: 10px 22px; background: rgba(0,0,0,0.55);
     border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
-    font-size: 14px; color: rgba(255,255,255,0.85);
-    z-index: 10; text-align: center; white-space: nowrap; pointer-events: none;
+    font-size: 13px; color: rgba(255,255,255,0.85);
+    transition: opacity 0.6s; z-index: 10; text-align: center; white-space: nowrap; pointer-events: none;
   }
-  
+  .btn {
+    position: absolute; padding: 7px 14px; background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
+    font-size: 11px; color: rgba(255,255,255,0.9); cursor: pointer; z-index: 10; white-space: nowrap;
+  }
+  .btn:active { background: rgba(255,255,255,0.25); }
+
+  #resetBtn { top: 20px; left: 16px; display: none; }
+  #debugBtn { top: 20px; right: 16px; background: rgba(255, 100, 0, 0.3); border-color: rgba(255, 100, 0, 0.5); }
+
+  #debugPanel {
+    position: absolute; top: 60px; right: 16px; z-index: 50;
+    background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
+    padding: 16px; width: 280px; display: none; flex-direction: column; gap: 12px;
+  }
+  .debug-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .debug-row input[type="range"] { width: 120px; }
+  #debugOutput {
+    background: #000; padding: 8px; border-radius: 6px; font-family: monospace; font-size: 11px;
+    color: #4ade80; white-space: pre-wrap; word-break: break-all; user-select: text; margin-top: 5px;
+  }
+
   #startOverlay {
     position: absolute; inset: 0; z-index: 100;
     background: radial-gradient(circle at 50% 35%, #1a1030, #000 75%);
@@ -34,7 +56,7 @@
   .start-card {
     max-width: 340px; width: 100%; text-align: center; padding: 28px 24px;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 22px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 22px; backdrop-filter: blur(14px);
   }
   .start-card h1 { font-size: 21px; font-weight: 700; margin-bottom: 12px; }
   .start-card p { font-size: 13px; line-height: 1.65; color: rgba(255,255,255,0.72); margin-bottom: 20px; }
@@ -42,18 +64,38 @@
     width: 100%; padding: 14px 0; font-size: 15px; font-weight: 700; color: #0a0a0a;
     background: linear-gradient(135deg, #a7f3d0, #6ee7b7); border: none; border-radius: 14px; cursor: pointer;
   }
+  #copyParamsBtn {
+    width: 100%; padding: 8px 0; font-size: 12px; font-weight: 600;
+    color: #0a0a0a; background: linear-gradient(135deg, #fde68a, #fbbf24);
+    border: none; border-radius: 8px; cursor: pointer; margin-top: 4px;
+  }
 </style>
 </head>
 <body>
 <div id="stage">
   <canvas id="three-canvas"></canvas>
+  <div id="ar-overlay"></div>
+
   <div id="status">准备就绪</div>
-  <div id="hint">扫描桌面，点击绿环放置</div>
+  <div id="hint">移动手机扫描桌面，点击绿环放置</div>
+
+  <div class="btn" id="resetBtn">↺ 重新放置</div>
+  <div class="btn" id="debugBtn">⚙️ 参数调整</div>
+
+  <div id="debugPanel">
+    <div class="debug-row">
+      <span>模型缩放</span>
+      <input type="range" id="scaleSlider" min="0.001" max="10" step="0.001" value="0.05">
+      <span id="scaleVal">0.05</span>
+    </div>
+    <div id="debugOutput"></div>
+    <button id="copyParamsBtn">📋 复制参数</button>
+  </div>
 
   <div id="startOverlay">
     <div class="start-card">
-      <h1>🚀 ARKit 真实 SLAM</h1>
-      <p>苹果专属体验<br>移动手机扫描桌面放置模型</p>
+      <h1>🚀 真实 AR SLAM</h1>
+      <p>支持 WebXR 的设备（如安卓 Chrome）<br>拿远拿近，模型将锚定在现实中</p>
       <button id="startBtn">启动 AR 体验</button>
     </div>
   </div>
@@ -71,13 +113,49 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-let CONFIG = { SCALE: 0.27 };
-// 你的模型链接
+let CONFIG = { SCALE: 0.05 }; // 默认改小一点，防止模型太大导致黑屏
 const MODEL_URL = 'https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/building.glb';
 
 const statusEl = document.getElementById('status');
 const hintEl = document.getElementById('hint');
 const threeCanvas = document.getElementById('three-canvas');
+const overlayEl = document.getElementById('ar-overlay');
+const resetBtn = document.getElementById('resetBtn');
+const debugBtn = document.getElementById('debugBtn');
+const debugPanel = document.getElementById('debugPanel');
+const debugOutput = document.getElementById('debugOutput');
+
+debugBtn.addEventListener('click', () => {
+  debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
+});
+
+function updateOutput() {
+  const text = `const CONFIG = {\n  SCALE: ${CONFIG.SCALE.toFixed(3)}\n};`;
+  debugOutput.innerHTML = text.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
+}
+
+document.getElementById('copyParamsBtn').addEventListener('click', async () => {
+  const text = `const CONFIG = {\n  SCALE: ${CONFIG.SCALE.toFixed(3)}\n};`;
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById('copyParamsBtn');
+    btn.textContent = '✅ 已复制';
+    setTimeout(() => { btn.textContent = '📋 复制参数'; }, 1200);
+  } catch (e) {}
+});
+
+document.getElementById('scaleSlider').addEventListener('input', (e) => {
+  CONFIG.SCALE = parseFloat(e.target.value);
+  document.getElementById('scaleVal').innerText = CONFIG.SCALE.toFixed(3);
+  if (flowerObj) {
+    const box1 = new THREE.Box3().setFromObject(flowerObj);
+    const s1 = box1.getSize(new THREE.Vector3());
+    const max1 = Math.max(s1.x, s1.y, s1.z) || 1;
+    flowerObj.scale.setScalar(CONFIG.SCALE / max1);
+  }
+  updateOutput();
+});
+updateOutput();
 
 // ================= Three.js 核心 =================
 const scene = new THREE.Scene();
@@ -85,11 +163,12 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setClearColor(0x000000, 0);
+renderer.setClearColor(0x000000, 0); // 透明背景
 renderer.xr.enabled = true;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.5));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+// 打光，确保模型在黑屏下也能看清
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
 dirLight.position.set(5, 10, 7);
 scene.add(dirLight);
 
@@ -127,58 +206,80 @@ loader.load(MODEL_URL, (gltf) => {
     
     modelLoaded = true;
     statusEl.textContent = '模型加载成功';
-}, undefined, () => { statusEl.textContent = '模型加载失败，请检查链接'; });
+}, undefined, () => { statusEl.textContent = '模型加载失败'; });
 
 // 启动 AR
 async function startAR() {
-  if (!navigator.xr) { alert('XRViewer 未准备好'); return false; }
+  if (!navigator.xr) { alert('不支持 WebXR'); return false; }
   try {
-    // 苹果 XRViewer 支持的标准参数
+    // 最关键修复：去掉 local-floor，用兼容性最好的配置
     xrSession = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
-      optionalFeatures: ['local-floor']
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: document.getElementById('stage') }
     });
   } catch (e) {
-    console.error("启动错误:", e);
-    alert('启动失败: ' + e.message);
+    console.error("启动错误详细:", e);
+    alert('AR 启动失败！\n\n1. 请检查是否开启了科学上网工具。\n2. 如果是在 iPhone 上，iOS 系统限制可能导致黑屏，建议用安卓。');
     return false;
   }
 
   await renderer.xr.setSession(xrSession);
   
-  // 苹果默认用 local 空间
+  // 使用 local 代替 local-floor
   xrRefSpace = await xrSession.requestReferenceSpace('local');
-  
   const viewerSpace = await xrSession.requestReferenceSpace('viewer');
-  hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+  
+  // 请求 hit-test
+  try {
+    hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+  } catch (err) {
+    console.warn("Hit-test 不可用:", err);
+  }
 
   renderer.setAnimationLoop(xrLoop);
   return true;
 }
 
 // 点击放置
-threeCanvas.addEventListener('pointerdown', () => {
+overlayEl.addEventListener('pointerdown', () => {
   if (!placingMode || !xrSession || !xrHitValid) return;
   
   const m = new THREE.Matrix4().fromArray(xrHitMatrix);
   const hitPos = new THREE.Vector3().setFromMatrixPosition(m);
 
   if (flowerObj) {
+    // 把模型放到命中的地面，稍微抬高 0.01 防止闪烁
     flowerObj.position.copy(hitPos);
+    flowerObj.position.y += 0.01; 
     flowerObj.visible = true;
   }
 
   placingMode = false;
   hitRing.visible = false;
-  hintEl.textContent = '模型已锚定，走动查看';
+  hintEl.textContent = '模型已锚定在现实空间';
+  setTimeout(() => { hintEl.style.opacity = '0'; }, 4000);
+  resetBtn.style.display = 'block';
   statusEl.textContent = '放置成功';
 });
 
+resetBtn.addEventListener('click', () => {
+  placingMode = true;
+  if (flowerObj) flowerObj.visible = false;
+  hitRing.visible = false;
+  statusEl.textContent = '扫描平面中...';
+  hintEl.textContent = '移动手机扫描桌面 · 点击绿环放置';
+  hintEl.style.opacity = '1';
+  resetBtn.style.display = 'none';
+});
+
 // ================= 渲染循环 =================
+let frameCount = 0;
 function xrLoop(time, frame) {
   if (!frame) return;
+  frameCount++;
 
-  // 平面扫描
+  // 1. 平面扫描
   if (hitTestSource) {
     const hitResults = frame.getHitTestResults(hitTestSource);
     if (hitResults.length > 0) {
@@ -203,6 +304,14 @@ function xrLoop(time, frame) {
     }
   }
 
+  // 2. 防止摄像头黑屏的“骗术”：把相机的投影矩阵直接赋给渲染器
+  const xrCam = renderer.xr.getCamera(camera);
+  camera.matrix.copy(xrCam.matrix);
+  camera.projectionMatrix.copy(xrCam.projectionMatrix);
+  camera.projectionMatrixInverse.copy(xrCam.projectionMatrixInverse);
+  camera.updateMatrixWorld(true);
+
+  // 3. 渲染
   renderer.render(scene, camera);
 }
 
