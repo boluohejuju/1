@@ -2,39 +2,39 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>MediaPipe 平面AR + 石头抓取</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>真实 AR 平面放置 · 手势抓取模型</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: #000; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff;
     -webkit-user-select: none; user-select: none; touch-action: none; }
   #stage { position: relative; width: 100vw; height: 100vh; }
-  #video, #canvas {
+
+  #video, #canvas, #three-canvas {
     position: absolute; top: 0; left: 0;
     width: 100%; height: 100%;
     object-fit: cover;
   }
-  /* 后置摄像头不需要镜像 */
+
   #video { z-index: 1; }
-  #canvas { z-index: 2; pointer-events: none; }
-  #three-canvas {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
-    z-index: 3; pointer-events: none;
-  }
+  #three-canvas { z-index: 2; pointer-events: none; }
+  #canvas { z-index: 3; pointer-events: none; }
+  #ar-overlay { position: absolute; inset: 0; z-index: 4; }
+
   #status {
     position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; color: rgba(255,255,255,0.85); letter-spacing: 0.05em;
+    font-size: 11px; color: rgba(255,255,255,0.9); letter-spacing: 0.05em;
     z-index: 10; padding: 6px 14px; background: rgba(0,0,0,0.65); border-radius: 999px;
     white-space: nowrap; font-family: ui-monospace, monospace;
+    pointer-events: none;
   }
   #hint {
-    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-    padding: 10px 24px; background: rgba(255,255,255,0.1);
+    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+    padding: 10px 22px; background: rgba(0,0,0,0.55);
     border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
-    font-size: 13px; color: rgba(255,255,255,0.7);
-    transition: opacity 0.6s; z-index: 10; text-align: center;
+    font-size: 13px; color: rgba(255,255,255,0.85);
+    transition: opacity 0.6s; z-index: 10; text-align: center; white-space: nowrap;
     pointer-events: none;
   }
   .btn {
@@ -45,138 +45,116 @@
     z-index: 10; user-select: none; white-space: nowrap;
   }
   .btn:active { background: rgba(255,255,255,0.25); }
+
+  #resetBtn { top: 20px; left: 16px; display: none; }
+  #debugBtn { top: 20px; right: 100px; background: rgba(255, 100, 0, 0.3); border-color: rgba(255, 100, 0, 0.5); }
   #toggleSkeleton { top: 20px; right: 16px; }
-  #guide {
-    position: absolute; top: 16px; left: 16px; z-index: 10;
-    max-width: 244px;
-    padding: 9px 12px 10px;
-    background: rgba(0,0,0,0.55);
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 14px;
-    font-size: 11px; line-height: 1.55;
-    color: rgba(255,255,255,0.85);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-    user-select: none;
-  }
-  .guide-head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; cursor: pointer;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: #fff;
-  }
-  .guide-fold {
-    font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.55);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 999px; padding: 1px 7px;
-  }
-  .guide-body { margin-top: 7px; display: flex; flex-direction: column; gap: 3px; }
-  .guide-row { display: flex; align-items: flex-start; gap: 6px; }
-  .guide-row b { color: #fff; font-weight: 600; }
 
-  #paramPanel {
-    position: absolute; top: 60px; right: 16px; z-index: 20;
-    width: 260px;
-    background: rgba(20, 24, 30, 0.92);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 14px;
-    padding: 14px 16px 16px;
-    font-size: 12px;
-    color: rgba(255,255,255,0.9);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-    display: flex; flex-direction: column; gap: 10px;
-    max-height: calc(100vh - 140px);
-    overflow-y: auto;
+  #debugPanel {
+    position: absolute; top: 60px; right: 16px; z-index: 50;
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
+    padding: 16px; width: 280px;
+    display: none; flex-direction: column; gap: 12px;
   }
-  #paramPanel::-webkit-scrollbar { width: 4px; }
-  #paramPanel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
-  .param-row { display: flex; flex-direction: column; gap: 3px; }
-  .param-row label {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 11px; color: rgba(255,255,255,0.7);
+  .debug-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .debug-row input[type="range"] { width: 120px; }
+  #debugOutput {
+    background: #000; padding: 8px; border-radius: 6px; font-family: monospace; font-size: 11px;
+    color: #4ade80; white-space: pre-wrap; word-break: break-all; user-select: text; margin-top: 5px;
   }
-  .param-row label .val {
-    font-family: ui-monospace, monospace;
-    color: #00d4ff; font-weight: 600;
-  }
-  .param-row input[type="range"] {
-    width: 100%; height: 4px; -webkit-appearance: none;
-    background: rgba(255,255,255,0.15); border-radius: 2px; outline: none;
-  }
-  .param-row input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 14px; height: 14px;
-    background: #00d4ff; border-radius: 50%; cursor: pointer;
-    box-shadow: 0 0 6px rgba(0,212,255,0.6);
-  }
-  .param-actions { display: flex; gap: 8px; margin-top: 4px; }
-  .param-actions .btn {
-    position: static; flex: 1; text-align: center; padding: 8px 0;
-    font-size: 11px; border-radius: 8px;
-  }
-  .btn-copy { background: rgba(0, 212, 255, 0.18); border-color: rgba(0,212,255,0.4); color: #00d4ff; }
-  .btn-copy:active { background: rgba(0, 212, 255, 0.3); }
-  .btn-reset { background: rgba(255,255,255,0.08); }
 
-  @media (max-width: 600px) {
-    #guide { top: 58px; left: 10px; max-width: 58vw; font-size: 10px; padding: 8px 10px 9px; }
-    #paramPanel { width: 210px; top: 52px; right: 8px; padding: 10px 12px 12px; font-size: 11px; }
+  #reticle {
+    position: absolute; top: 50%; left: 50%;
+    width: 60px; height: 60px; margin-left: -30px; margin-top: -30px;
+    border: 2px solid rgba(255,255,255,0.45); border-radius: 50%;
+    z-index: 6; pointer-events: none; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.04); transition: all 0.2s;
+  }
+  #reticle.active { border-color: #4ade80; background: rgba(74,222,128,0.12); transform: scale(1.08); }
+
+  #startOverlay {
+    position: absolute; inset: 0; z-index: 100;
+    background: radial-gradient(circle at 50% 35%, #1a1030, #000 75%);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .start-card {
+    max-width: 340px; width: 100%; text-align: center; padding: 28px 24px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 22px; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .start-card h1 { font-size: 21px; font-weight: 700; margin-bottom: 12px; }
+  .start-card p { font-size: 13px; line-height: 1.65; color: rgba(255,255,255,0.72); margin-bottom: 20px; }
+  #startBtn {
+    width: 100%; padding: 14px 0; font-size: 15px; font-weight: 700; color: #0a0a0a;
+    background: linear-gradient(135deg, #a7f3d0, #6ee7b7); border: none; border-radius: 14px; cursor: pointer;
   }
 </style>
 </head>
 <body>
 <div id="stage">
   <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
   <canvas id="three-canvas"></canvas>
-  
-  <div id="guide">
-    <div class="guide-head" id="guideHead">
-      <span>🪨 平面AR抓取</span>
-      <span class="guide-fold" id="guideFold">收起</span>
-    </div>
-    <div class="guide-body" id="guideBody">
-      <div class="guide-row"><span>1.</span><span>移动手机寻找<b>地面网格</b></span></div>
-      <div class="guide-row"><span>2.</span><span><b>点击屏幕</b>将石头放置在地面</span></div>
-      <div class="guide-row"><span>3.</span><span>将手伸入石头范围，<b>五指合拢</b>抓取</span></div>
-      <div class="guide-row"><span>4.</span><span>手指张开，石头自由落体砸向地面</span></div>
-    </div>
-  </div>
-  
-  <div id="status">正在加载...</div>
-  <div id="hint">请将摄像头对准平坦地面 · 点击屏幕放置石头</div>
+  <canvas id="canvas"></canvas>
+  <div id="ar-overlay"></div>
+  <div id="reticle"></div>
+
+  <div id="status">正在初始化...</div>
+  <div id="hint">将手机对准桌面 · 点击屏幕放置模型</div>
+
+  <div class="btn" id="resetBtn">↺ 重新放置</div>
+  <div class="btn" id="debugBtn">⚙️ 参数调整</div>
   <div class="btn" id="toggleSkeleton">骨架 OFF</div>
 
-  <div id="paramPanel">
-    <div style="font-size:13px; font-weight:700; letter-spacing:0.04em; margin-bottom:2px;">⚙️ 参数面板</div>
-    <div class="param-row">
-      <label>相机高度 (cameraY) <span class="val" id="vCameraY">4.0</span></label>
-      <input type="range" id="sCameraY" min="-10" max="20" step="0.1" value="4.0">
+  <div id="debugPanel">
+    <div class="debug-row">
+      <span>相机高度 (Y)</span>
+      <input type="range" id="camYSlider" min="-3.0" max="3.0" step="0.1" value="0.0">
+      <span id="camYVal">0.0</span>
     </div>
-    <div class="param-row">
-      <label>相机角度 (lookAt Y) <span class="val" id="vLookAtY">-2.0</span></label>
-      <input type="range" id="sLookAtY" min="-10" max="10" step="0.1" value="-2.0">
+    <div class="debug-row">
+      <span>相机俯角</span>
+      <input type="range" id="camPitchSlider" min="-90" max="90" step="1" value="0">
+      <span id="camPitchVal">0°</span>
     </div>
-    <div class="param-row">
-      <label>相机距离 (Z) <span class="val" id="vCameraZ">12.0</span></label>
-      <input type="range" id="sCameraZ" min="2" max="30" step="0.5" value="12.0">
+    <div class="debug-row">
+      <span>视场角 FOV</span>
+      <input type="range" id="fovSlider" min="30" max="110" step="1" value="60">
+      <span id="fovVal">60°</span>
     </div>
-    <div class="param-row">
-      <label>模型大小 (scale) <span class="val" id="vModelScale">1.0</span></label>
-      <input type="range" id="sModelScale" min="0.2" max="3.0" step="0.05" value="1.0">
+    <div class="debug-row">
+      <span>地面高度 (Y)</span>
+      <input type="range" id="groundYSlider" min="-5.0" max="0.0" step="0.1" value="-2.0">
+      <span id="groundYVal">-2.0</span>
     </div>
-    <div class="param-row">
-      <label>地面网格透明度 <span class="val" id="vGridOpacity">0.4</span></label>
-      <input type="range" id="sGridOpacity" min="0" max="1" step="0.05" value="0.4">
+    <div class="debug-row">
+      <span>模型缩放</span>
+      <input type="range" id="scaleSlider" min="0" max="10" step="0.01" value="0.27">
+      <span id="scaleVal">0.27</span>
     </div>
-    <div class="param-actions">
-      <div class="btn btn-copy" id="copyParams">📋 复制参数</div>
-      <div class="btn btn-reset" id="resetParams">↺ 重置</div>
+    <div class="debug-row">
+      <span>抓取屏幕距离</span>
+      <input type="range" id="grabDistSlider" min="0.05" max="0.6" step="0.01" value="0.28">
+      <span id="grabDistVal">0.28</span>
+    </div>
+    <div class="debug-row">
+      <span>握拳阈值</span>
+      <input type="range" id="grabRatioSlider" min="0.8" max="2.5" step="0.05" value="1.6">
+      <span id="grabRatioVal">1.60</span>
+    </div>
+    <div id="debugOutput">const CONFIG = {<br>  SCALE: 0.27,<br>  GROUND_Y: -2.0,<br>  CAMERA_Y: 0.0,<br>  CAMERA_PITCH: 0,<br>  CAMERA_FOV: 60<br>};</div>
+  </div>
+
+  <div id="startOverlay">
+    <div class="start-card">
+      <h1>🏢 AR 模型抓取</h1>
+      <p>将手机摄像头向下对准桌面<br>点击屏幕把模型放到桌上<br>然后伸出手，合拢五指把它抓起来</p>
+      <button id="startBtn">开始体验</button>
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script src="https://unpkg.com/@mediapipe/hands/hands.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -184,15 +162,24 @@
     "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
   }
 }
-</script><script type="module">
+</script>
+<script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const CONFIG = {
-  GRAB_DISTANCE_RATIO: 1.35, 
-  RELEASE_DISTANCE_RATIO: 1.7,
-  GRAB_SCREEN_DIST: 0.12,
+let CONFIG = {
+  SCALE: 0.27,
+  GROUND_Y: -2.0,
+  CAMERA_Y: 0.0,
+  CAMERA_PITCH: 0,
+  CAMERA_FOV: 60,
+  GRAB_DISTANCE_RATIO: 1.6,
+  RELEASE_DISTANCE_RATIO: 2.0,
+  GRAB_SCREEN_DIST: 0.28,
 };
+
+// ★ 修改：模型 URL 改为 stone.glb
+const MODEL_URL = 'https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/stone.glb';
 
 const video    = document.getElementById('video');
 const canvas   = document.getElementById('canvas');
@@ -200,21 +187,56 @@ const ctx      = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
 const hintEl   = document.getElementById('hint');
 const threeCanvas = document.getElementById('three-canvas');
+const overlayEl = document.getElementById('ar-overlay');
+const reticleEl = document.getElementById('reticle');
+const resetBtn = document.getElementById('resetBtn');
 
-document.getElementById('guideHead').addEventListener('click', () => {
-  const body = document.getElementById('guideBody');
-  const fold = document.getElementById('guideFold');
-  const hidden = body.style.display === 'none';
-  body.style.display = hidden ? 'flex' : 'none';
-  fold.textContent = hidden ? '收起' : '展开';
+const debugBtn = document.getElementById('debugBtn');
+const debugPanel = document.getElementById('debugPanel');
+const debugOutput = document.getElementById('debugOutput');
+
+debugBtn.addEventListener('click', () => {
+  debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
 });
 
-const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS|HuaweiBrowser|HonorBrowser|MicroMessenger|WeChat/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
-const VIDEO_W = 1280, VIDEO_H = 720;
-const MP_W = 256, MP_H = 192;
-const MP_INTERVAL_MS = 33;
+function updateOutput() {
+  debugOutput.innerHTML = `const CONFIG = {<br>  SCALE: ${CONFIG.SCALE.toFixed(2)},<br>  GROUND_Y: ${CONFIG.GROUND_Y.toFixed(1)},<br>  CAMERA_Y: ${CONFIG.CAMERA_Y.toFixed(1)},<br>  CAMERA_PITCH: ${CONFIG.CAMERA_PITCH.toFixed(0)},<br>  CAMERA_FOV: ${CONFIG.CAMERA_FOV.toFixed(0)}<br>};`;
+}
 
-const KP_NAMES = ['WRIST','THUMB_CMC','THUMB_MCP','THUMB_IP','THUMB_TIP','INDEX_MCP','INDEX_PIP','INDEX_DIP','INDEX_TIP','MIDDLE_MCP','MIDDLE_PIP','MIDDLE_DIP','MIDDLE_TIP','RING_MCP','RING_PIP','RING_DIP','RING_TIP','PINKY_MCP','PINKY_PIP','PINKY_DIP','PINKY_TIP'];
+document.getElementById('camYSlider').addEventListener('input', (e) => { CONFIG.CAMERA_Y = parseFloat(e.target.value); document.getElementById('camYVal').innerText = CONFIG.CAMERA_Y.toFixed(1); updateOutput(); });
+document.getElementById('camPitchSlider').addEventListener('input', (e) => { CONFIG.CAMERA_PITCH = parseFloat(e.target.value); document.getElementById('camPitchVal').innerText = CONFIG.CAMERA_PITCH + '°'; updateOutput(); });
+document.getElementById('fovSlider').addEventListener('input', (e) => { CONFIG.CAMERA_FOV = parseFloat(e.target.value); document.getElementById('fovVal').innerText = CONFIG.CAMERA_FOV + '°'; camera.fov = CONFIG.CAMERA_FOV; camera.updateProjectionMatrix(); updateOutput(); });
+document.getElementById('groundYSlider').addEventListener('input', (e) => { CONFIG.GROUND_Y = parseFloat(e.target.value); document.getElementById('groundYVal').innerText = CONFIG.GROUND_Y.toFixed(1); gridHelper.position.y = CONFIG.GROUND_Y; updateOutput(); });
+document.getElementById('scaleSlider').addEventListener('input', (e) => {
+  CONFIG.SCALE = parseFloat(e.target.value);
+  document.getElementById('scaleVal').innerText = CONFIG.SCALE.toFixed(2);
+  if (flowerObj) {
+    const box1 = new THREE.Box3().setFromObject(flowerObj);
+    const s1 = box1.getSize(new THREE.Vector3());
+    const max1 = Math.max(s1.x, s1.y, s1.z) || 1;
+    const k = CONFIG.SCALE / max1;
+    flowerObj.scale.setScalar(k);
+    const box2 = new THREE.Box3().setFromObject(flowerObj);
+    const s2 = box2.getSize(new THREE.Vector3());
+    objRadius = Math.max(s2.x, s2.y, s2.z) * 0.5;
+  }
+  updateOutput();
+});
+document.getElementById('grabDistSlider').addEventListener('input', (e) => {
+  CONFIG.GRAB_SCREEN_DIST = parseFloat(e.target.value);
+  document.getElementById('grabDistVal').innerText = CONFIG.GRAB_SCREEN_DIST.toFixed(2);
+});
+document.getElementById('grabRatioSlider').addEventListener('input', (e) => {
+  CONFIG.GRAB_DISTANCE_RATIO = parseFloat(e.target.value);
+  document.getElementById('grabRatioVal').innerText = CONFIG.GRAB_DISTANCE_RATIO.toFixed(2);
+});
+updateOutput();
+
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const VIDEO_W = IS_MOBILE ? 640 : 1280;
+const VIDEO_H = IS_MOBILE ? 480 : 720;
+const MP_W = 160; const MP_H = 120;
+
 const HIGHLIGHT_POINTS = [4, 8, 12, 16, 20, 0];
 const HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
@@ -236,9 +258,9 @@ function updateLayout() {
   }
   layout = { offsetX, offsetY, drawW, drawH };
 }
-window.addEventListener('resize', updateLayout);
-window.addEventListener('orientationchange', () => setTimeout(updateLayout, 200));
-// 后置摄像头不需要 x 轴翻转
+window.addEventListener('resize', () => { updateLayout(); onWindowResize(); });
+window.addEventListener('orientationchange', () => setTimeout(() => { updateLayout(); onWindowResize(); }, 250));
+
 function nToC(nx, ny) {
   return { x: layout.offsetX + nx * layout.drawW, y: layout.offsetY + ny * layout.drawH };
 }
@@ -246,8 +268,10 @@ function nToC(nx, ny) {
 const mpCanvas = document.createElement('canvas');
 mpCanvas.width = MP_W; mpCanvas.height = MP_H;
 const mpCtx = mpCanvas.getContext('2d', { alpha: false });
-const handSlots = { right: { lms: null, lastCenter: null }, left: { lms: null, lastCenter: null } };
+const handSlots = { right: { lms: null }, left: { lms: null } };
+
 function getHandCenter(lms) { return { x: (lms[0].x + lms[9].x) / 2, y: (lms[0].y + lms[9].y) / 2 }; }
+
 function processHands(results) {
   const lmsArr = results.multiHandLandmarks || [];
   let rightDet = null, leftDet = null;
@@ -255,114 +279,83 @@ function processHands(results) {
     const sorted = [...lmsArr].sort((a, b) => getHandCenter(a).x - getHandCenter(b).x);
     rightDet = sorted[0]; leftDet = sorted[1];
   } else if (lmsArr.length === 1) {
-    const lms = lmsArr[0], c = getHandCenter(lms), stR = handSlots.right, stL = handSlots.left;
-    const dR = stR.lastCenter ? Math.hypot(c.x - stR.lastCenter.x, c.y - stR.lastCenter.y) : Infinity;
-    const dL = stL.lastCenter ? Math.hypot(c.x - stL.lastCenter.x, c.y - stL.lastCenter.y) : Infinity;
-    if (dR === Infinity && dL === Infinity) { if (c.x < 0.5) rightDet = lms; else leftDet = lms; }
-    else if (dR <= dL) rightDet = lms;
-    else leftDet = lms;
+    const lms = lmsArr[0], c = getHandCenter(lms);
+    if (c.x < 0.5) rightDet = lms; else leftDet = lms;
   }
   handSlots.right.lms = rightDet;
-  handSlots.right.lastCenter = rightDet ? getHandCenter(rightDet) : null;
   handSlots.left.lms = leftDet;
-  handSlots.left.lastCenter = leftDet ? getHandCenter(leftDet) : null;
 }
 
-async function initCamera() {
-  try {
-    // 强制要求后置摄像头
-    const constraints = {
-      video: { facingMode: { exact: "environment" }, width: { ideal: VIDEO_W }, height: { ideal: VIDEO_H } },
-      audio: false
-    };
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
-    } catch (e) {
-      console.warn("强制后置失败，尝试默认环境模式", e);
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-    }
-    
-    video.srcObject = stream;
-    await video.play();
-    if (video.videoWidth) updateLayout();
-    video.addEventListener('loadedmetadata', updateLayout);
-  } catch (e) { 
-    statusEl.textContent = '摄像头失败：' + e.name; 
-    console.error(e);
-  }
-}
 let handsInstance = null, mpBusy = false, lastMpTime = 0, mpReady = false;
 async function initHands() {
-  if (typeof Hands === 'undefined') { statusEl.textContent = 'MediaPipe 库加载失败'; return; }
-  const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.4, selfieMode: false });
+  if (typeof Hands === 'undefined') return;
+  const hands = new Hands({ locateFile: (f) => `https://unpkg.com/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.4, selfieMode: false });
   hands.onResults((r) => processHands(r));
-  try { await hands.initialize(); handsInstance = hands; mpReady = true; } catch (e) { console.error(e); statusEl.textContent = 'MediaPipe 初始化失败'; }
+  try { await hands.initialize(); handsInstance = hands; mpReady = true; } catch (e) { console.error(e); }
 }
+
 function pumpMP() {
   if (mpBusy || !mpReady || video.readyState < 2) return;
   const now = performance.now();
-  if (now - lastMpTime < MP_INTERVAL_MS) return;
+  if (now - lastMpTime < 66) return;
   mpBusy = true; lastMpTime = now;
   mpCtx.drawImage(video, 0, 0, MP_W, MP_H);
   handsInstance.send({ image: mpCanvas }).then(() => { mpBusy = false; }).catch(() => { mpBusy = false; });
 }
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-let cameraY = 4.0, lookAtY = -2.0, cameraZ = 12.0, modelScale = 1.0, gridOpacity = 0.4;
-let gyroEnabled = false, deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
-
-function updateCamera() {
-  if (gyroEnabled) {
-    // 简易陀螺仪映射：利用手机倾斜角改变相机位置 (受参数面板限制)
-    const targetAlpha = THREE.MathUtils.degToRad(deviceOrientation.alpha || 0);
-    const targetBeta = THREE.MathUtils.degToRad(deviceOrientation.beta || 0);
-    
-    // 根据手机倾斜调整
-    camera.position.x = -Math.sin(targetAlpha) * 10;
-    camera.position.y = cameraY + (targetBeta - 1.0) * 5; 
-    camera.position.z = Math.cos(targetAlpha) * cameraZ;
-    
-    camera.lookAt(0, lookAtY, 0);
-  } else {
-    camera.position.set(0, cameraY, cameraZ);
-    camera.lookAt(0, lookAtY, 0);
+async function initCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: VIDEO_W }, height: { ideal: VIDEO_H } }, audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    if (video.videoWidth) updateLayout();
+    video.addEventListener('loadedmetadata', updateLayout);
+    return true;
+  } catch (e) {
+    statusEl.textContent = '摄像头失败：' + e.name;
+    return false;
   }
-  camera.updateProjectionMatrix();
 }
-updateCamera();
 
-// 监听设备方向
-window.addEventListener('deviceorientation', (e) => {
-  if (e.alpha !== null) {
-    deviceOrientation = { alpha: e.alpha, beta: e.beta, gamma: e.gamma };
-    if (!gyroEnabled && Math.abs(e.beta) > 0) {
-      gyroEnabled = true;
-      document.getElementById('hint').textContent = "点击屏幕放置石头";
-    }
-  }
-});
-
+// Three.js
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(CONFIG.CAMERA_FOV, window.innerWidth / window.innerHeight, 0.05, 200);
 const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.5));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(5, 10, 7);
 scene.add(dirLight);
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-const groundY = -2.5;
-const gridHelper = new THREE.GridHelper(30, 60, 0x00d4ff, 0x0088aa);
-gridHelper.position.y = groundY;
-gridHelper.material.transparent = true;
-gridHelper.material.opacity = gridOpacity;
+const gridHelper = new THREE.GridHelper(10, 10, 0x00ff00, 0x444444);
+gridHelper.position.y = CONFIG.GROUND_Y;
 scene.add(gridHelper);
 
-// 阴影贴图生成
+let gyroReady = false;
+let baseQuat = new THREE.Quaternion();
+
+function onDeviceOrientation(e) {
+  if (e.alpha === null || e.beta === null || e.gamma === null) return;
+  const alpha = THREE.MathUtils.degToRad(e.alpha);
+  const beta  = THREE.MathUtils.degToRad(e.beta);
+  const gamma = THREE.MathUtils.degToRad(e.gamma);
+  const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+  baseQuat.setFromEuler(euler);
+  baseQuat.multiply(new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)));
+  let angle = 0;
+  if (screen.orientation && typeof screen.orientation.angle === 'number') angle = screen.orientation.angle;
+  else if (typeof window.orientation === 'number') angle = window.orientation;
+  baseQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -THREE.MathUtils.degToRad(angle)));
+  gyroReady = true;
+}
+
 function createShadowTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 128;
   const ct = c.getContext('2d');
@@ -373,255 +366,360 @@ function createShadowTexture() {
   ct.fillStyle = gradient; ct.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 }
-const shadowGeometry = new THREE.PlaneGeometry(1, 1);
 const shadowMaterial = new THREE.MeshBasicMaterial({ map: createShadowTexture(), transparent: true, opacity: 0.6, depthWrite: false });
-const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
+const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMaterial);
 shadowMesh.rotation.x = -Math.PI / 2;
-shadowMesh.position.y = groundY + 0.01;
+shadowMesh.position.y = CONFIG.GROUND_Y + 0.01;
+shadowMesh.visible = false;
 scene.add(shadowMesh);
 
-const GRAVITY = -40.0;       
-const RESTITUTION = 0.3;     
-const MIN_VELOCITY = 1.0;    
+const raycaster = new THREE.Raycaster();
+const tmpHit = new THREE.Vector3();
+const tmpNdc = new THREE.Vector2();
 
-const ballState = {
-  position: new THREE.Vector3(0, groundY + 0.5, 0),
+function screenToGround(clientX, clientY) {
+  tmpNdc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(tmpNdc, camera);
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -CONFIG.GROUND_Y);
+  const hitPoint = new THREE.Vector3();
+  const ok = raycaster.ray.intersectPlane(groundPlane, hitPoint);
+  if (!ok) return null;
+  const dist = hitPoint.distanceTo(camera.position);
+  if (dist > 0.1 && dist < 30) {
+    if (hitPoint.y < CONFIG.GROUND_Y - 5) return null;
+    return hitPoint.clone();
+  }
+  return null;
+}
+
+// ★ 重力参数大幅增强：模拟石头沉重下坠、轻微反弹
+const GRAVITY = -18.0;            // 原 -2.8，石头重得多，重力加速度大
+const AIR_DRAG_Y = 0.1;           // 原 0.9，空气阻力极小，几乎自由落体
+const AIR_DRAG_X = 0.4;           // 原 1.2，水平阻力减小，保持砸落轨迹
+const BOUNCE_RESTITUTION = 0.12;  // 原 0.35，石头几乎不反弹，只轻微弹跳
+const MAX_BOUNCE_COUNT = 1;       // 原 2，石头弹一次就停
+const MIN_BOUNCE_SPEED = 1.2;     // 原 0.4，只有很大速度才反弹，否则直接静止
+
+const objState = {
+  position: new THREE.Vector3(0, CONFIG.GROUND_Y, -2),
   velocity: new THREE.Vector3(0, 0, 0),
   isHeld: false,
   isFalling: false,
   isResting: true,
-  isPlaced: false, // 必须点击后才会变成 true
   releaseCooldown: 0,
-  bounceCount: 0,            
-  angularVelocity: new THREE.Vector3(0, 0, 0)
+  bounceCount: 0,
+  wobbleTime: 0
 };
-let currentGroundY = groundY;
-let basketball = null, ballRadius = 0.5, ballLoaded = false;
+let flowerObj = null, objRadius = 0.1, modelLoaded = false;
+let modelVisible = false;
+let placingMode = true;
+const grabPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+let currentObjGroup = null;
 
-const raycaster = new THREE.Raycaster();
-const grabPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.2); 
-const ndcRaycaster = new THREE.Raycaster();
+// 创建一个明显的占位模型（蓝色八面体），页面打开即可放置
+function createPlaceholder() {
+  const group = new THREE.Group();
+  const geo = new THREE.OctahedronGeometry(0.4, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x4a90d9, roughness: 0.4, metalness: 0.3 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 0.4;
+  group.add(mesh);
+  return group;
+}
 
-const loader = new GLTFLoader();
-loader.load('https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/stone.glb', (gltf) => {
-  basketball = gltf.scene;
-  const box = new THREE.Box3().setFromObject(basketball);
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  basketball.scale.set(1.0/maxDim, 1.0/maxDim, 1.0/maxDim);
-  
-  const box2 = new THREE.Box3().setFromObject(basketball);
-  const center2 = box2.getCenter(new THREE.Vector3());
-  
-  const ballGroup = new THREE.Group();
-  basketball.position.sub(center2);
-  ballGroup.add(basketball);
-  ballGroup.scale.setScalar(modelScale);
-  
-  scene.add(ballGroup);
-  basketball = ballGroup;
-  
-  const box3 = new THREE.Box3().setFromObject(basketball);
-  const size3 = box3.getSize(new THREE.Vector3());
-  ballRadius = Math.max(size3.x, size3.y, size3.z) * 0.5;
-  
-  ballLoaded = true;
-  // 初始隐藏，直到点击
-  basketball.visible = false;
-  shadowMesh.visible = false;
-}, undefined, (err) => {
-  console.error('模型加载失败:', err);
-  statusEl.textContent = '模型加载失败';
-});
-
-// 点击屏幕放置
-window.addEventListener('pointerdown', (e) => {
-  if (!ballLoaded || ballState.isPlaced) return;
-  
-  const rect = threeCanvas.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  
-  raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-  // 与地面 Y 轴平面求交
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundY);
-  const target = new THREE.Vector3();
-  
-  if (raycaster.ray.intersectPlane(plane, target)) {
-    ballState.position.copy(target);
-    ballState.position.y = groundY + ballRadius;
-    ballState.isPlaced = true;
-    ballState.isResting = true;
-    basketball.position.copy(ballState.position);
-    basketball.visible = true;
-    shadowMesh.visible = true;
-    document.getElementById('hint').style.opacity = '0';
+function setupObject(obj) {
+  if (currentObjGroup) {
+    scene.remove(currentObjGroup);
+    currentObjGroup.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+        else child.material.dispose();
+      }
+    });
+    currentObjGroup = null;
   }
-});function getActiveHand() { return handSlots.right.lms || handSlots.left.lms || null; }
+
+  flowerObj = obj;
+  const box = new THREE.Box3().setFromObject(flowerObj);
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const k = CONFIG.SCALE / maxDim;
+  flowerObj.scale.setScalar(k);
+
+  const box2 = new THREE.Box3().setFromObject(flowerObj);
+  const center2 = box2.getCenter(new THREE.Vector3());
+  flowerObj.position.sub(center2);
+
+  const objGroup = new THREE.Group();
+  objGroup.add(flowerObj);
+  objGroup.visible = false;
+  scene.add(objGroup);
+
+  currentObjGroup = objGroup;
+  flowerObj = objGroup;
+
+  const box3 = new THREE.Box3().setFromObject(flowerObj);
+  const size3 = box3.getSize(new THREE.Vector3());
+  objRadius = Math.max(size3.x, size3.y, size3.z) * 0.5;
+  modelLoaded = true;
+}
+
+// ★ 页面打开即创建占位模型，保证点击可放置
+setupObject(createPlaceholder());
+statusEl.textContent = '占位模型就绪 · 正在加载 stone.glb';
+
+// ★ 后台加载 stone.glb，成功后替换占位模型
+const loader = new GLTFLoader();
+loader.load(
+  MODEL_URL,
+  (gltf) => {
+    setupObject(gltf.scene);
+    statusEl.textContent = 'stone.glb 加载成功';
+    console.log('stone.glb 加载成功');
+  },
+  (xhr) => {
+    if (xhr.total > 0) {
+      statusEl.textContent = `加载 stone.glb ${Math.round((xhr.loaded / xhr.total) * 100)}%`;
+    }
+  },
+  (err) => {
+    console.error('stone.glb 加载失败:', err);
+    statusEl.textContent = 'stone.glb 加载失败，继续使用占位模型';
+  }
+);
+
+function getActiveHand() { return handSlots.right.lms || handSlots.left.lms || null; }
+function getPalmPoint(lms) { return lms[9]; }
 function getPalmSize(lms) { return Math.hypot(lms[9].x - lms[0].x, lms[9].y - lms[0].y) || 0.1; }
+
 function isFullyGrabbed(lms) {
   if (!lms) return false;
-  const palmSize = getPalmSize(lms);
-  const distToWrist = (idx) => Math.hypot(lms[idx].x - lms[0].x, lms[idx].y - lms[0].y) / palmSize;
-  return distToWrist(8) < CONFIG.GRAB_DISTANCE_RATIO && distToWrist(12) < CONFIG.GRAB_DISTANCE_RATIO && 
-         distToWrist(16) < CONFIG.GRAB_DISTANCE_RATIO && distToWrist(20) < CONFIG.GRAB_DISTANCE_RATIO;
+  const p = getPalmSize(lms);
+  const wrist = lms[0];
+  const tips = [4, 8, 12, 16, 20];
+  let closedCount = 0;
+  for (const idx of tips) {
+    const tip = lms[idx];
+    const d = Math.hypot(tip.x - wrist.x, tip.y - wrist.y) / p;
+    if (d < CONFIG.GRAB_DISTANCE_RATIO) closedCount++;
+  }
+  return closedCount >= 4;
 }
+
 function isHandOpen(lms) {
   if (!lms) return true;
-  const palmSize = getPalmSize(lms);
-  const distToWrist = (idx) => Math.hypot(lms[idx].x - lms[0].x, lms[idx].y - lms[0].y) / palmSize;
-  return distToWrist(8) > CONFIG.RELEASE_DISTANCE_RATIO || distToWrist(12) > CONFIG.RELEASE_DISTANCE_RATIO;
+  const p = getPalmSize(lms);
+  const wrist = lms[0];
+  const tips = [8, 12, 16, 20];
+  let openCount = 0;
+  for (const idx of tips) {
+    const tip = lms[idx];
+    const d = Math.hypot(tip.x - wrist.x, tip.y - wrist.y) / p;
+    if (d > CONFIG.RELEASE_DISTANCE_RATIO) openCount++;
+  }
+  return openCount >= 3;
 }
-function getVisualHandPos(lms) { if (!lms) return null; return { x: lms[12].x, y: lms[12].y }; }
-function getBallScreenPos() {
-  const p = ballState.position.clone().project(camera);
+
+function releaseObject() {
+  objState.isHeld = false;
+  objState.isFalling = true;
+  objState.isResting = false;
+  objState.releaseCooldown = 0.6;
+  objState.bounceCount = 0;
+  objState.wobbleTime = 0;
+  // ★ 释放时给一个微小的水平随机速度，更像石头掉落（可忽略）
+  objState.velocity.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3);
+}
+
+function getObjectScreenPos() {
+  const p = objState.position.clone().project(camera);
   return { x: (1 + p.x) / 2, y: (1 - p.y) / 2 };
 }
-function getGrabTargetWorldPos(lms) {
+
+function getHandScreenPos(lms) {
+  const pt = getPalmPoint(lms);
+  return { x: pt.x, y: pt.y };
+}
+
+const tmpPlane = new THREE.Plane();
+const tmpNormal = new THREE.Vector3();
+const tmpV = new THREE.Vector3();
+
+function handScreenToWorld(lms) {
   if (!lms) return null;
-  const screenPos = nToC(lms[12].x, lms[12].y);
-  const ndcX = (screenPos.x / window.innerWidth) * 2 - 1;
-  const ndcY = -(screenPos.y / window.innerHeight) * 2 + 1;
-  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
-  const targetPos = new THREE.Vector3();
-  raycaster.ray.intersectPlane(grabPlane, targetPos);
-  return targetPos;
-}
-function getBallScreenRadius() {
-  const p1 = ballState.position.clone().project(camera);
-  const p2 = ballState.position.clone().add(new THREE.Vector3(ballRadius, 0, 0)).project(camera);
-  return Math.abs(p1.x - p2.x) / 2;
-}
-function keepBallInsideScreen() {
-  if (ballState.isHeld) return;
-  const ndc = ballState.position.clone().project(camera);
-  const pRight = ballState.position.clone().add(new THREE.Vector3(ballRadius, 0, 0)).project(camera);
-  const pLeft = ballState.position.clone().add(new THREE.Vector3(-ballRadius, 0, 0)).project(camera);
-  const pTop = ballState.position.clone().add(new THREE.Vector3(0, ballRadius, 0)).project(camera);
-  const pBottom = ballState.position.clone().add(new THREE.Vector3(0, -ballRadius, 0)).project(camera);
-  
-  const rX = Math.abs(pRight.x - pLeft.x) / 2;
-  const rY = Math.abs(pTop.y - pBottom.y) / 2;
-  const padding = 0.02;
-  const marginX = rX + padding;
-  const marginY = rY + padding;
-  
-  let targetNdcX = ndc.x, targetNdcY = ndc.y;
-  let hitX = false, hitY = false;
-  
-  if (ndc.x - marginX < -1) { targetNdcX = -1 + marginX; hitX = true; }
-  else if (ndc.x + marginX > 1) { targetNdcX = 1 - marginX; hitX = true; }
-  
-  if (ndc.y + marginY > 1) { targetNdcY = 1 - marginY; hitY = true; }
-  else if (ndc.y - marginY < -1) { targetNdcY = -1 + marginY; hitY = true; }
-  
-  if (hitX || hitY) {
-      const zPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -ballState.position.z);
-      ndcRaycaster.setFromCamera(new THREE.Vector2(targetNdcX, targetNdcY), camera);
-      const newPos = new THREE.Vector3();
-      ndcRaycaster.ray.intersectPlane(zPlane, newPos);
-      ballState.position.copy(newPos);
+  const pt = getPalmPoint(lms);
+  const ndcX = pt.x * 2 - 1;
+  const ndcY = -(pt.y * 2 - 1);
+
+  camera.getWorldDirection(tmpNormal);
+  tmpPlane.setFromNormalAndCoplanarPoint(tmpNormal, objState.position);
+
+  raycaster.setFromCamera(tmpNdc.set(ndcX, ndcY), camera);
+  const hit = new THREE.Vector3();
+  if (raycaster.ray.intersectPlane(tmpPlane, hit)) {
+    return hit;
   }
+  const dist = camera.position.distanceTo(objState.position);
+  tmpV.set(ndcX, ndcY, 0.5).unproject(camera);
+  tmpV.sub(camera.position).normalize();
+  return camera.position.clone().add(tmpV.multiplyScalar(dist));
 }
 
 function updateLogic(deltaTime) {
-  if (!ballLoaded || !ballState.isPlaced) return "未放置石头";
-  
-  if (ballState.releaseCooldown > 0) ballState.releaseCooldown -= deltaTime;
-  const activeHand = getActiveHand();
-  let debugStr = ballState.isResting ? "静止" : "下落中";
+  if (!modelLoaded || !modelVisible) return '';
+  if (objState.releaseCooldown > 0) objState.releaseCooldown -= deltaTime;
 
-  if (ballState.isHeld) {
-    ballState.angularVelocity.set(0, 0, 0);
+  const activeHand = getActiveHand();
+  let debugStr = '无手';
+  let debugInfo = '';
+
+  if (objState.isHeld) {
     if (!activeHand) {
-      ballState.isHeld = false; ballState.isFalling = true; ballState.isResting = false;
-      ballState.velocity.set(0, 0, 0); ballState.releaseCooldown = 0.5; ballState.bounceCount = 0;
-      debugStr = "手离开-掉落";
+      releaseObject();
+      debugStr = '手消失·释放';
+    } else if (isHandOpen(activeHand)) {
+      releaseObject();
+      debugStr = '松手砸落';   // ★ 文字改为砸落
     } else {
-      if (isHandOpen(activeHand)) {
-        ballState.isHeld = false; ballState.isFalling = true; ballState.isResting = false;
-        ballState.velocity.set(0, 0, 0); ballState.releaseCooldown = 0.5; ballState.bounceCount = 0;
-        debugStr = "松手砸下";
-      } else {
-        const targetPos = getGrabTargetWorldPos(activeHand);
-        if (targetPos) ballState.position.copy(targetPos);
-        debugStr = "抓取中";
-      }
+      const targetPos = handScreenToWorld(activeHand);
+      if (targetPos) objState.position.copy(targetPos);
+      debugStr = '抓取中';
     }
   } else {
-    if (activeHand && ballState.releaseCooldown <= 0) {
-      const isGrabPose = isFullyGrabbed(activeHand);
-      const handVisual = getVisualHandPos(activeHand);
-      const ballScreen = getBallScreenPos();
-      const screenDist = Math.hypot(handVisual.x - ballScreen.x, handVisual.y - ballScreen.y);
-      if (isGrabPose) {
+    if (activeHand && objState.releaseCooldown <= 0) {
+      const grabbed = isFullyGrabbed(activeHand);
+      const handScreen = getHandScreenPos(activeHand);
+      const objScreen = getObjectScreenPos();
+      const screenDist = Math.hypot(handScreen.x - objScreen.x, handScreen.y - objScreen.y);
+      debugInfo = `握${grabbed?'✓':'✗'} 屏距${screenDist.toFixed(2)}`;
+
+      if (grabbed) {
         if (screenDist < CONFIG.GRAB_SCREEN_DIST) {
-          ballState.isHeld = true; ballState.isFalling = false; ballState.isResting = false;
-          ballState.velocity.set(0, 0, 0); ballState.bounceCount = 0;
-          debugStr = "抓取成功";
-          const targetPos = getGrabTargetWorldPos(activeHand);
-          if (targetPos) ballState.position.copy(targetPos);
+          objState.isHeld = true;
+          objState.isFalling = false;
+          objState.isResting = false;
+          objState.velocity.set(0, 0, 0);
+          objState.bounceCount = 0;
+          objState.wobbleTime = 0;
+          const targetPos = handScreenToWorld(activeHand);
+          if (targetPos) objState.position.copy(targetPos);
+          debugStr = '抓取成功';
         } else {
-          debugStr = "手势正确，距离太远";
+          debugStr = '距离太远';
         }
+      } else {
+        debugStr = '手势未到位';
       }
     }
 
-    if (!ballState.isHeld) {
-      if (!ballState.isResting || ballState.velocity.length() > 0.01) {
-        ballState.velocity.y += GRAVITY * deltaTime;
-        ballState.position.addScaledVector(ballState.velocity, deltaTime);
-        
-        if (ballState.position.y <= currentGroundY + ballRadius) {
-          ballState.position.y = currentGroundY + ballRadius; 
-          if (ballState.velocity.y < -MIN_VELOCITY && ballState.bounceCount < 2) {
-            ballState.velocity.y = -ballState.velocity.y * RESTITUTION;
-            ballState.bounceCount++;
-            ballState.velocity.x *= 0.8;
-            ballState.angularVelocity.z = (Math.random() - 0.5) * 5;
-            ballState.angularVelocity.x = (Math.random() - 0.5) * 5;
-            debugStr = `弹跳第${ballState.bounceCount}次`;
-          } else {
-            ballState.velocity.set(0, 0, 0);
-            ballState.isResting = true;
-            ballState.isFalling = false;
-            ballState.angularVelocity.multiplyScalar(0.5);
-          }
-        }
-        
-        if (ballState.isResting) {
-            ballState.velocity.x *= 0.8;
-            if (Math.abs(ballState.velocity.x) < 0.1) ballState.velocity.x = 0;
+    if (!objState.isHeld && !objState.isResting) {
+      // ★ 物理更新：更强重力，更小阻力
+      objState.velocity.y += GRAVITY * deltaTime;
+      objState.velocity.y *= Math.max(0, 1 - AIR_DRAG_Y * deltaTime);
+      objState.velocity.x *= Math.max(0, 1 - AIR_DRAG_X * deltaTime);
+      objState.velocity.z *= Math.max(0, 1 - AIR_DRAG_X * deltaTime);
+      objState.position.addScaledVector(objState.velocity, deltaTime);
+
+      const floorY = CONFIG.GROUND_Y + objRadius;
+      if (objState.position.y <= floorY) {
+        objState.position.y = floorY;
+        //         if (objState.velocity.y < -MIN_BOUNCE_SPEED && objState.bounceCount < MAX_BOUNCE_COUNT) {
+          objState.velocity.y = -objState.velocity.y * BOUNCE_RESTITUTION;
+          objState.velocity.x *= 0.4;
+          objState.velocity.z *= 0.4;
+          objState.bounceCount++;
         } else {
-            ballState.velocity.x *= 0.99;
+          objState.velocity.set(0, 0, 0);
+          objState.isResting = true;
+          objState.isFalling = false;
         }
-        keepBallInsideScreen();
       }
     }
   }
 
-  if (basketball) {
-    basketball.position.copy(ballState.position);
-    if (!ballState.isHeld && ballState.angularVelocity.length() > 0.01) {
-      basketball.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), ballState.angularVelocity.z * deltaTime);
-      basketball.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), ballState.angularVelocity.x * deltaTime);
-      ballState.angularVelocity.multiplyScalar(0.98);
+  if (flowerObj) {
+    flowerObj.position.copy(objState.position);
+    if (objState.isHeld) {
+      // 保持
+    } else if (!objState.isResting) {
+      // ★ 下落时旋转更剧烈，石头翻滚感
+      objState.wobbleTime += deltaTime;
+      const w = objState.wobbleTime;
+      flowerObj.rotation.z = Math.sin(w * 5.0) * 0.35;
+      flowerObj.rotation.x = Math.cos(w * 4.2) * 0.28;
+      flowerObj.rotation.y += deltaTime * 2.5;
+    } else {
+      const decay = Math.pow(0.02, deltaTime);
+      flowerObj.rotation.z *= decay;
+      flowerObj.rotation.x *= decay;
+      flowerObj.rotation.y *= decay;
     }
   }
-  
+
   if (shadowMesh) {
-    const height = Math.max(ballState.position.y - (currentGroundY + ballRadius), 0);
+    const height = Math.max(objState.position.y - (CONFIG.GROUND_Y + objRadius), 0);
     const t = Math.min(height / 5, 1);
-    const baseScale = ballRadius * 2.5 * 1.0;
+    const baseScale = objRadius * 3.0;
     const currentScale = baseScale * (1 - t * 0.5);
     shadowMesh.scale.set(currentScale, currentScale, 1);
-    shadowMesh.position.x = ballState.position.x;
-    shadowMesh.position.z = ballState.position.z;
+    shadowMesh.position.x = objState.position.x;
+    shadowMesh.position.z = objState.position.z;
     shadowMaterial.opacity = Math.max(0.6 * (1 - t * 0.8), 0.05);
   }
 
-  return debugStr;
+  return debugInfo ? debugStr + ' ' + debugInfo : debugStr;
 }
+
+function enterPlacingMode() {
+  placingMode = true;
+  modelVisible = false;
+  if (flowerObj) flowerObj.visible = false;
+  shadowMesh.visible = false;
+  reticleEl.style.display = 'flex';
+  hintEl.style.opacity = '1';
+  hintEl.textContent = '将手机向下对准桌面 · 点击屏幕放置模型';
+  statusEl.textContent = '🎯 对准桌面放置';
+  resetBtn.style.display = 'none';
+}
+
+function placeAt(hit) {
+  placingMode = false;
+  modelVisible = true;
+  objState.position.set(hit.x, CONFIG.GROUND_Y + objRadius, hit.z);
+  objState.velocity.set(0, 0, 0);
+  objState.isHeld = false;
+  objState.isResting = true;
+  objState.isFalling = false;
+  if (flowerObj) {
+    flowerObj.visible = true;
+    flowerObj.position.copy(objState.position);
+    flowerObj.rotation.set(0, 0, 0);
+  }
+  shadowMesh.visible = true;
+  reticleEl.style.display = 'none';
+  hintEl.textContent = '伸出手 · 五指合拢抓取模型';
+  hintEl.style.opacity = '1';
+  setTimeout(() => { hintEl.style.opacity = '0'; }, 4000);
+  resetBtn.style.display = 'block';
+  statusEl.textContent = '已放置 · 伸手抓取';
+}
+
+// ★ pointerdown 直接触发放置，不等待 pointerup，避免移动端事件丢失
+overlayEl.addEventListener('pointerdown', (e) => {
+  if (!placingMode) return;
+  const hit = screenToGround(e.clientX, e.clientY);
+  if (hit) {
+    placeAt(hit);
+  } else {
+    hintEl.textContent = '未命中桌面 · 请把手机再向下倾斜';
+    hintEl.style.opacity = '1';
+  }
+});
+
+resetBtn.addEventListener('click', () => {
+  enterPlacingMode();
+});
 
 let showSkeleton = false;
 document.getElementById('toggleSkeleton').onclick = function() {
@@ -649,52 +747,58 @@ function drawSkeleton(lms, isRight) {
     ctx.fillStyle = HIGHLIGHT_POINTS.includes(idx) ? tipColor : pointColor;
     ctx.beginPath(); ctx.arc(P.x, P.y, HIGHLIGHT_POINTS.includes(idx) ? 5 : 3, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  for (let idx = 0; idx < lms.length; idx++) {
-    const p = lms[idx]; if (!p) continue;
-    const P = nToC(p.x, p.y);
-    if (HIGHLIGHT_POINTS.includes(idx)) {
-      const label = `${idx} ${KP_NAMES[idx]}`;
-      ctx.font = `bold 12px ui-monospace, monospace`;
-      const textW = ctx.measureText(label).width;
-      const padX = 6, boxH = 20, offsetX = 10;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      if (ctx.roundRect) ctx.beginPath(), ctx.roundRect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH, 4), ctx.fill();
-      else ctx.fillRect(P.x + offsetX, P.y - boxH / 2, textW + padX * 2, boxH);
-      ctx.strokeStyle = isRight ? 'rgba(0, 255, 68, 0.4)' : 'rgba(0, 212, 255, 0.4)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.fillText(label, P.x + offsetX + padX, P.y);
-    } else {
-      const label = `${idx}`;
-      ctx.font = `bold 11px ui-monospace, monospace`;
-      const tx = P.x + 6, ty = P.y - 6;
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeText(label, tx, ty);
-      ctx.fillStyle = '#ffffff'; ctx.fillText(label, tx, ty);
-    }
-  }
 }
 
-let lastFpsTime = performance.now(), framesSinceFps = 0, fps = 0, lastFrameTime = performance.now();
+let lastFrameTime = performance.now();
+
 function loop() {
   try {
     const now = performance.now();
     const deltaTime = Math.min((now - lastFrameTime) / 1000, 0.05);
     lastFrameTime = now;
+
     pumpMP();
+
+    if (gyroReady) {
+      camera.quaternion.copy(baseQuat);
+      camera.rotateX(THREE.MathUtils.degToRad(CONFIG.CAMERA_PITCH));
+    } else {
+      camera.quaternion.setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(CONFIG.CAMERA_PITCH), 0, 0, 'YXZ'));
+    }
+    camera.position.set(0, CONFIG.CAMERA_Y, 0);
+    camera.updateMatrixWorld(true);
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (showSkeleton) {
       if (handSlots.right.lms) drawSkeleton(handSlots.right.lms, true);
       if (handSlots.left.lms) drawSkeleton(handSlots.left.lms, false);
     }
-    
-    const debugState = updateLogic(deltaTime) || "";
+
+    if (placingMode) {
+      const hit = screenToGround(window.innerWidth / 2, window.innerHeight / 2);
+      if (hit) {
+        reticleEl.classList.add('active');
+        hintEl.textContent = '平面已锁定 · 点击屏幕放置';
+      } else {
+        reticleEl.classList.remove('active');
+        hintEl.textContent = '将手机向下对准桌面';
+      }
+    }
+
+    const debugState = updateLogic(deltaTime) || '';
     renderer.render(scene, camera);
-    
-    framesSinceFps++;
-    if (now - lastFpsTime >= 1000) { fps = framesSinceFps; framesSinceFps = 0; lastFpsTime = now; }
-    const ballStatus = ballState.isHeld ? '🪨抓取中' : (ballState.isFalling ? '⬇️下落/弹跳' : (ballState.isPlaced ? '⏸️静止' : '📍未放置'));
-    statusEl.textContent = `📱 ${fps}fps · ${debugState} · ${ballStatus}`;
-    if (handSlots.right.lms || handSlots.left.lms) hintEl.style.opacity = '0';
-  } catch (err) { console.error('loop error:', err); }
+
+    if (placingMode) {
+      statusEl.textContent = `🎯 对准桌面放置`;
+    } else {
+      const objStatus = objState.isHeld ? '🪨抓取中' : (objState.isFalling ? '⬇️砸落' : '⏸️静止');
+      statusEl.textContent = `${debugState} · ${objStatus}`;
+    }
+
+    if ((handSlots.right.lms || handSlots.left.lms) && !placingMode) {
+      hintEl.style.opacity = '0';
+    }
+  } catch (err) { console.error(err); }
   requestAnimationFrame(loop);
 }
 
@@ -706,55 +810,28 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize);
 
-const vCameraY = document.getElementById('vCameraY'), sCameraY = document.getElementById('sCameraY');
-const vLookAtY = document.getElementById('vLookAtY'), sLookAtY = document.getElementById('sLookAtY');
-const vCameraZ = document.getElementById('vCameraZ'), sCameraZ = document.getElementById('sCameraZ');
-const vModelScale = document.getElementById('vModelScale'), sModelScale = document.getElementById('sModelScale');
-const vGridOpacity = document.getElementById('vGridOpacity'), sGridOpacity = document.getElementById('sGridOpacity');
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const startBtn = document.getElementById('startBtn');
+  startBtn.textContent = '请求陀螺仪权限...';
+  startBtn.disabled = true;
 
-sCameraY.addEventListener('input', (e) => { cameraY = parseFloat(e.target.value); vCameraY.textContent = cameraY.toFixed(1); updateCamera(); });
-sLookAtY.addEventListener('input', (e) => { lookAtY = parseFloat(e.target.value); vLookAtY.textContent = lookAtY.toFixed(1); updateCamera(); });
-sCameraZ.addEventListener('input', (e) => { cameraZ = parseFloat(e.target.value); vCameraZ.textContent = cameraZ.toFixed(1); updateCamera(); });
-sModelScale.addEventListener('input', (e) => {
-  modelScale = parseFloat(e.target.value); vModelScale.textContent = modelScale.toFixed(2);
-  if (basketball) {
-    basketball.scale.setScalar(modelScale);
-    const box = new THREE.Box3().setFromObject(basketball);
-    ballRadius = Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z) * 0.5;
-    if (ballState.isResting) { ballState.position.y = currentGroundY + ballRadius; basketball.position.copy(ballState.position); }
-  }
-});
-sGridOpacity.addEventListener('input', (e) => { gridOpacity = parseFloat(e.target.value); vGridOpacity.textContent = gridOpacity.toFixed(2); gridHelper.material.opacity = gridOpacity; });
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      await DeviceOrientationEvent.requestPermission();
+    }
+  } catch (e) { }
 
-document.getElementById('copyParams').addEventListener('click', () => {
-  const str = `cameraY: ${cameraY.toFixed(2)}, lookAtY: ${lookAtY.toFixed(2)}, cameraZ: ${cameraZ.toFixed(2)}, modelScale: ${modelScale.toFixed(2)}, gridOpacity: ${gridOpacity.toFixed(2)}`;
-  navigator.clipboard.writeText(str).then(() => {
-    const btn = document.getElementById('copyParams'); const old = btn.textContent;
-    btn.textContent = '✅ 已复制'; setTimeout(() => btn.textContent = old, 1500);
-  }).catch(() => alert('复制失败:\n' + str));
-});
+  window.addEventListener('deviceorientation', onDeviceOrientation, true);
 
-document.getElementById('resetParams').addEventListener('click', () => {
-  cameraY = 4.0; lookAtY = -2.0; cameraZ = 12.0; modelScale = 1.0; gridOpacity = 0.4;
-  sCameraY.value = cameraY; vCameraY.textContent = cameraY.toFixed(1);
-  sLookAtY.value = lookAtY; vLookAtY.textContent = lookAtY.toFixed(1);
-  sCameraZ.value = cameraZ; vCameraZ.textContent = cameraZ.toFixed(1);
-  sModelScale.value = modelScale; vModelScale.textContent = modelScale.toFixed(2);
-  sGridOpacity.value = gridOpacity; vGridOpacity.textContent = gridOpacity.toFixed(2);
-  updateCamera(); gridHelper.material.opacity = gridOpacity;
-  if (basketball) {
-    basketball.scale.setScalar(modelScale);
-    const box = new THREE.Box3().setFromObject(basketball);
-    ballRadius = Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z) * 0.5;
-    if (ballState.isResting) { ballState.position.y = currentGroundY + ballRadius; basketball.position.copy(ballState.position); }
-  }
-});
+  startBtn.textContent = '请求摄像头...';
+  const camOk = await initCamera();
+  if (!camOk) return;
 
-(async () => {
-  await initCamera();
+  initHands();
+  document.getElementById('startOverlay').style.display = 'none';
+  enterPlacingMode();
   loop();
-  await initHands();
-})();
+});
 </script>
 </body>
 </html>
