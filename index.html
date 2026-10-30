@@ -7,44 +7,41 @@
 <style>
   body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
   #canvas { width: 100vw; height: 100vh; display: block; }
-  
-  /* 提示文字 */
   #hint {
     position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
     color: white; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 20px;
-    font-size: 14px; pointer-events: none; text-align: center; z-index: 10;
+    font-size: 14px; pointer-events: none; text-align: center; z-index: 10; display: none;
   }
-
-  /* 启动覆盖层 */
   #overlay {
     position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
     background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100;
   }
-  #overlay h1 { color: #fff; margin-bottom: 20px; }
-  #overlay p { color: #aaa; margin-bottom: 30px; text-align: center; padding: 0 20px;}
+  #overlay h1 { color: #fff; margin-bottom: 10px; }
+  #overlay p { color: #aaa; margin-bottom: 30px; text-align: center; padding: 0 20px; font-size: 14px;}
   #startBtn {
     padding: 15px 40px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px;
-    background: #4ade80; color: #000; cursor: pointer;
+    background: #4ade80; color: #000; cursor: pointer; transition: 0.3s;
   }
+  #startBtn:disabled { background: #666; color: #aaa; cursor: not-allowed; }
+  #errorText { color: #ff4d4d; margin-top: 20px; text-align: center; padding: 0 20px; font-size: 14px; line-height: 1.5; }
 </style>
 </head>
 <body>
 
 <canvas id="canvas"></canvas>
-<div id="hint" style="display: none;">移动手机扫描桌面... 出现绿圈后点击屏幕</div>
+<div id="hint">移动手机扫描桌面... 出现绿圈后点击屏幕</div>
 
 <div id="overlay">
   <h1>极简 AR 体验</h1>
-  <p>请确保手机已安装 AR 服务，并开启了网络工具。<br>点击下方按钮启动。</p>
+  <p>请确保手机已安装 AR 服务，并开启了网络工具。</p>
   <button id="startBtn">启动 AR</button>
+  <div id="errorText"></div>
 </div>
 
-<!-- 引入 Three.js -->
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    "three": "https://unpkg.com/three@0.128.0/build/three.module.js"
   }
 }
 </script>
@@ -52,38 +49,28 @@
 <script type="module">
 import * as THREE from 'three';
 
-// 1. 初始化基础场景
 const canvas = document.getElementById('canvas');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
 
-// 开启 XR 支持
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.xr.enabled = true;
 
-// 2. 添加灯光
 const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
 light.position.set(0.5, 1, 0.25);
 scene.add(light);
 
-// 3. 内置一个立方体模型 (带颜色的线框+实体)
+// 生成一个 20cm 的红色立方体
 const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-const material = new THREE.MeshStandardMaterial({ 
-  color: 0xff4d6d, 
-  roughness: 0.3, 
-  metalness: 0.1 
-});
+const material = new THREE.MeshStandardMaterial({ color: 0xff4d6d, roughness: 0.3 });
 const cube = new THREE.Mesh(geometry, material);
-cube.visible = false; // 初始隐藏，放置后显示
+cube.visible = false;
 scene.add(cube);
 
-// 4. AR 核心变量
-let hitTestSource = null;
-let localSpace = null;
-let hitTestSourceRequested = false;
+// 准星
 const reticle = new THREE.Mesh(
   new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ color: 0x00ff00 })
@@ -92,432 +79,70 @@ reticle.visible = false;
 reticle.matrixAutoUpdate = false;
 scene.add(reticle);
 
-// 5. 点击屏幕放置物体
-renderer.domElement.addEventListener('pointerdown', () => {
+let hitTestSource = null;
+let localSpace = null;
+
+// 点击放置
+canvas.addEventListener('pointerdown', () => {
   if (reticle.visible) {
-    // 将物体移动到准星位置
     cube.position.setFromMatrixPosition(reticle.matrix);
     cube.visible = true;
-    
-    // 隐藏准星并提示成功
     reticle.visible = false;
-    document.getElementById('hint').innerText = '放置成功！拿远拿近看看效果';
+    document.getElementById('hint').innerText = '放置成功！';
     setTimeout(() => document.getElementById('hint').style.display = 'none', 3000);
   }
 });
 
-// 6. 启动 AR 流程
+// 启动 AR
 document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  const errText = document.getElementById('errorText');
+  
+  btn.textContent = '正在启动...';
+  btn.disabled = true;
+  errText.innerHTML = '';
+
   if (!navigator.xr) {
-    alert("你的浏览器不支持 WebXR");
+    errText.innerHTML = '当前浏览器不支持 WebXR。<br>请换用 Chrome 或 Edge。';
+    btn.textContent = '启动失败'; btn.disabled = false;
     return;
   }
 
   try {
-    // 请求 AR 会话 (必须包含 hit-test 平面检测)
+    // 极其精简的配置，只要 hit-test
     const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test', 'local-floor'],
+      requiredFeatures: ['hit-test']
     });
     
-    // 绑定 Three.js 渲染器和会话
     await renderer.xr.setSession(session);
     
-    // 隐藏启动页，显示提示文字
     document.getElementById('overlay').style.display = 'none';
     document.getElementById('hint').style.display = 'block';
 
-    // 设置坐标系
     localSpace = await session.requestReferenceSpace('local');
     const viewerSpace = await session.requestReferenceSpace('viewer');
     
-    // 请求命中检测源
-    session.requestHitTestSource({ space: viewerSpace }).then((source) => {
-      hitTestSource = source;
-    });
+    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-    // 开启渲染循环
-    renderer.setAnimationLoop(render);
-
-    // 监听会话结束
-    session.addEventListener('end', () => {
-      renderer.setAnimationLoop(null);
-      hitTestSource = null;
-      document.getElementById('overlay').style.display = 'flex';
-      document.getElementById('hint').style.display = 'none';
+    renderer.setAnimationLoop((time, frame) => {
+      if (frame && hitTestSource) {
+        const results = frame.getHitTestResults(hitTestSource);
+        if (results.length > 0) {
+          const pose = results[0].getPose(localSpace);
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+        } else {
+          reticle.visible = false;
+        }
+      }
+      renderer.render(scene, camera);
     });
 
   } catch (error) {
-    console.error("AR 启动失败:", error);
-    alert("AR 启动失败: " + error.message + "\n请确保使用了 HTTPS，且开启了梯子。");
-  }
-});
-
-// 7. 渲染循环
-function render(timestamp, frame) {
-  if (frame) {
-    // 获取平面检测结果
-    if (hitTestSource) {
-      const hitTestResults = frame.getHitTestResults(hitTestSource);
-      if (hitTestResults.length > 0) {
-        const hit = hitTestResults[0];
-        const pose = hit.getPose(localSpace);
-        
-        // 更新准星位置
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
-      } else {
-        reticle.visible = false;
-      }
-    }
-  }
-
-  // 渲染场景
-  renderer.render(scene, camera);
-}
-
-// 窗口大小适配
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-</script>
-</body>
-</html>!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>真实 AR SLAM 旗舰版</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: #000; overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff;
-    -webkit-user-select: none; user-select: none; touch-action: none; }
-  #stage { position: relative; width: 100vw; height: 100vh; }
-  #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
-  #ar-overlay { position: absolute; inset: 0; z-index: 4; }
-
-  #status {
-    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; color: rgba(255,255,255,0.9); letter-spacing: 0.05em;
-    z-index: 10; padding: 6px 14px; background: rgba(0,0,0,0.65); border-radius: 999px;
-    white-space: nowrap; font-family: ui-monospace, monospace; pointer-events: none;
-  }
-  #hint {
-    position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
-    padding: 10px 22px; background: rgba(0,0,0,0.55);
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
-    font-size: 13px; color: rgba(255,255,255,0.85);
-    transition: opacity 0.6s; z-index: 10; text-align: center; white-space: nowrap; pointer-events: none;
-  }
-  .btn {
-    position: absolute; padding: 7px 14px; background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 999px;
-    font-size: 11px; color: rgba(255,255,255,0.9); cursor: pointer; z-index: 10; white-space: nowrap;
-  }
-  .btn:active { background: rgba(255,255,255,0.25); }
-
-  #resetBtn { top: 20px; left: 16px; display: none; }
-  #debugBtn { top: 20px; right: 16px; background: rgba(255, 100, 0, 0.3); border-color: rgba(255, 100, 0, 0.5); }
-
-  #debugPanel {
-    position: absolute; top: 60px; right: 16px; z-index: 50;
-    background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px;
-    padding: 16px; width: 280px; display: none; flex-direction: column; gap: 12px;
-  }
-  .debug-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
-  .debug-row input[type="range"] { width: 120px; }
-  #debugOutput {
-    background: #000; padding: 8px; border-radius: 6px; font-family: monospace; font-size: 11px;
-    color: #4ade80; white-space: pre-wrap; word-break: break-all; user-select: text; margin-top: 5px;
-  }
-
-  #startOverlay {
-    position: absolute; inset: 0; z-index: 100;
-    background: radial-gradient(circle at 50% 35%, #1a1030, #000 75%);
-    display: flex; align-items: center; justify-content: center; padding: 24px;
-  }
-  .start-card {
-    max-width: 340px; width: 100%; text-align: center; padding: 28px 24px;
-    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 22px; backdrop-filter: blur(14px);
-  }
-  .start-card h1 { font-size: 21px; font-weight: 700; margin-bottom: 12px; }
-  .start-card p { font-size: 13px; line-height: 1.65; color: rgba(255,255,255,0.72); margin-bottom: 20px; }
-  #startBtn {
-    width: 100%; padding: 14px 0; font-size: 15px; font-weight: 700; color: #0a0a0a;
-    background: linear-gradient(135deg, #a7f3d0, #6ee7b7); border: none; border-radius: 14px; cursor: pointer;
-  }
-  #copyParamsBtn {
-    width: 100%; padding: 8px 0; font-size: 12px; font-weight: 600;
-    color: #0a0a0a; background: linear-gradient(135deg, #fde68a, #fbbf24);
-    border: none; border-radius: 8px; cursor: pointer; margin-top: 4px;
-  }
-</style>
-</head>
-<body>
-<div id="stage">
-  <canvas id="three-canvas"></canvas>
-  <div id="ar-overlay"></div>
-
-  <div id="status">准备就绪</div>
-  <div id="hint">移动手机扫描桌面，点击绿环放置</div>
-
-  <div class="btn" id="resetBtn">↺ 重新放置</div>
-  <div class="btn" id="debugBtn">⚙️ 参数调整</div>
-
-  <div id="debugPanel">
-    <div class="debug-row">
-      <span>模型缩放</span>
-      <input type="range" id="scaleSlider" min="0.001" max="10" step="0.001" value="0.05">
-      <span id="scaleVal">0.05</span>
-    </div>
-    <div id="debugOutput"></div>
-    <button id="copyParamsBtn">📋 复制参数</button>
-  </div>
-
-  <div id="startOverlay">
-    <div class="start-card">
-      <h1>🚀 真实 AR SLAM</h1>
-      <p>支持 WebXR 的设备（安卓 Chrome 体验最佳）<br>拿远拿近，模型将锚定在现实中</p>
-      <button id="startBtn">启动 AR 体验</button>
-    </div>
-  </div>
-</div>
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
-  }
-}
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-let CONFIG = { SCALE: 0.05 };
-const MODEL_URL = 'https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/building.glb';
-
-const statusEl = document.getElementById('status');
-const hintEl = document.getElementById('hint');
-const threeCanvas = document.getElementById('three-canvas');
-const overlayEl = document.getElementById('ar-overlay');
-const resetBtn = document.getElementById('resetBtn');
-const debugBtn = document.getElementById('debugBtn');
-const debugPanel = document.getElementById('debugPanel');
-const debugOutput = document.getElementById('debugOutput');
-
-debugBtn.addEventListener('click', () => {
-  debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
-});
-
-function updateOutput() {
-  const text = `const CONFIG = {\n  SCALE: ${CONFIG.SCALE.toFixed(3)}\n};`;
-  debugOutput.innerHTML = text.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;');
-}
-
-document.getElementById('copyParamsBtn').addEventListener('click', async () => {
-  const text = `const CONFIG = {\n  SCALE: ${CONFIG.SCALE.toFixed(3)}\n};`;
-  try {
-    await navigator.clipboard.writeText(text);
-    const btn = document.getElementById('copyParamsBtn');
-    btn.textContent = '✅ 已复制';
-    setTimeout(() => { btn.textContent = '📋 复制参数'; }, 1200);
-  } catch (e) {}
-});
-
-document.getElementById('scaleSlider').addEventListener('input', (e) => {
-  CONFIG.SCALE = parseFloat(e.target.value);
-  document.getElementById('scaleVal').innerText = CONFIG.SCALE.toFixed(3);
-  if (flowerObj) {
-    const box1 = new THREE.Box3().setFromObject(flowerObj);
-    const s1 = box1.getSize(new THREE.Vector3());
-    const max1 = Math.max(s1.x, s1.y, s1.z) || 1;
-    flowerObj.scale.setScalar(CONFIG.SCALE / max1);
-  }
-  updateOutput();
-});
-updateOutput();
-
-// ================= Three.js 核心 =================
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 200);
-const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setClearColor(0x000000, 0); // 背景透明
-renderer.xr.enabled = true;
-
-// 开启最基础的物理光照，防止模型太黑看不见
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.0));
-const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
-dirLight.position.set(5, 10, 7);
-scene.add(dirLight);
-
-// 绿环
-const ringGeo = new THREE.RingGeometry(0.08, 0.11, 32);
-const ringMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
-const hitRing = new THREE.Mesh(ringGeo, ringMat);
-hitRing.rotation.x = -Math.PI / 2;
-hitRing.visible = false;
-scene.add(hitRing);
-
-let xrSession = null, xrRefSpace = null, hitTestSource = null;
-let xrHitMatrix = null, xrHitValid = false;
-
-let flowerObj = null;
-let placingMode = true;
-
-// 加载模型
-statusEl.textContent = '正在加载模型...';
-const loader = new GLTFLoader();
-loader.load(MODEL_URL, (gltf) => {
-    flowerObj = gltf.scene;
-    const box = new THREE.Box3().setFromObject(flowerObj);
-    const size = box.getSize(new THREE.Vector3());
-    flowerObj.scale.setScalar(CONFIG.SCALE / (Math.max(size.x, size.y, size.z) || 1));
-
-    const box2 = new THREE.Box3().setFromObject(flowerObj);
-    flowerObj.position.sub(box2.getCenter(new THREE.Vector3()));
-
-    const objGroup = new THREE.Group();
-    objGroup.add(flowerObj);
-    objGroup.visible = false;
-    scene.add(objGroup);
-    flowerObj = objGroup;
-    
-    statusEl.textContent = '模型加载成功';
-}, undefined, () => { statusEl.textContent = '模型加载失败'; });
-
-// 启动 AR
-async function startAR() {
-  if (!navigator.xr) { alert('当前浏览器不支持 WebXR'); return false; }
-  try {
-    // 【核心配置】必须包含 hit-test，去掉所有可能导致报错的特性
-    xrSession = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test'],
-      optionalFeatures: ['dom-overlay'],
-      domOverlay: { root: document.getElementById('stage') }
-    });
-  } catch (e) {
-    console.error("AR Session 启动报错:", e);
-    alert('AR 启动失败：' + e.message + '\n\n如果是 iOS，请确认系统版本，苹果对第三方浏览器的 WebXR 支持极差。');
-    return false;
-  }
-
-  // 绑定会话，Three.js 会自动接管底层视频流
-  await renderer.xr.setSession(xrSession);
-  
-  // 申请空间坐标系
-  xrRefSpace = await xrSession.requestReferenceSpace('viewer');
-  try {
-    xrRefSpace = await xrSession.requestReferenceSpace('local');
-    hitTestSource = await xrSession.requestHitTestSource({ space: await xrSession.requestReferenceSpace('viewer') });
-  } catch (e) {
-    console.warn("坐标系获取失败", e);
-    statusEl.textContent = '坐标系获取失败';
-  }
-
-  renderer.setAnimationLoop(xrLoop);
-  return true;
-}
-
-// 点击放置
-overlayEl.addEventListener('pointerdown', () => {
-  if (!placingMode || !xrSession) return;
-  
-  if (xrHitValid && xrHitMatrix) {
-    const m = new THREE.Matrix4().fromArray(xrHitMatrix);
-    const hitPos = new THREE.Vector3().setFromMatrixPosition(m);
-
-    if (flowerObj) {
-      flowerObj.position.copy(hitPos);
-      flowerObj.position.y += 0.01; 
-      flowerObj.visible = true;
-    }
-
-    placingMode = false;
-    hitRing.visible = false;
-    hintEl.textContent = '模型已锚定在现实空间';
-    setTimeout(() => { hintEl.style.opacity = '0'; }, 4000);
-    resetBtn.style.display = 'block';
-    statusEl.textContent = '放置成功';
-  } else {
-    hintEl.textContent = '尚未扫描到平面，请移动手机';
-  }
-});
-
-resetBtn.addEventListener('click', () => {
-  placingMode = true;
-  if (flowerObj) flowerObj.visible = false;
-  hitRing.visible = false;
-  statusEl.textContent = '扫描平面中...';
-  hintEl.textContent = '移动手机扫描桌面 · 点击绿环放置';
-  hintEl.style.opacity = '1';
-  resetBtn.style.display = 'none';
-});
-
-// ================= 渲染循环（最强防黑屏） =================
-function xrLoop(time, frame) {
-  if (!frame) return;
-
-  // 1. 扫描平面
-  if (hitTestSource) {
-    const hitResults = frame.getHitTestResults(hitTestSource);
-    if (hitResults.length > 0) {
-      const pose = hitResults[0].getPose(xrRefSpace);
-      if (pose) {
-        xrHitMatrix = pose.transform.matrix;
-        xrHitValid = true;
-        if (placingMode) {
-          const m = new THREE.Matrix4().fromArray(xrHitMatrix);
-          hitRing.position.setFromMatrixPosition(m);
-          hitRing.position.y += 0.005;
-          hitRing.visible = true;
-          hintEl.textContent = '平面已锁定 · 点击屏幕放置';
-        }
-      }
-    } else {
-      xrHitValid = false;
-      if (placingMode) {
-        hitRing.visible = false;
-        hintEl.textContent = '移动手机扫描桌面...';
-      }
-    }
-  }
-
-  // 2. 强制同步底层 XR 相机的投影矩阵，这是防止黑屏的最后一道防线
-  const xrCam = renderer.xr.getCamera(camera);
-  camera.matrix.copy(xrCam.matrix);
-  camera.projectionMatrix.copy(xrCam.projectionMatrix);
-  camera.projectionMatrixInverse.copy(xrCam.projectionMatrixInverse);
-  camera.updateMatrixWorld(true);
-
-  // 3. 渲染
-  renderer.render(scene, camera);
-}
-
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-window.addEventListener('resize', onWindowResize);
-
-document.getElementById('startBtn').addEventListener('click', async () => {
-  const startBtn = document.getElementById('startBtn');
-  startBtn.textContent = '启动中...';
-  startBtn.disabled = true;
-
-  const ok = await startAR();
-  if (ok) {
-    document.getElementById('startOverlay').style.display = 'none';
-  } else {
-    startBtn.textContent = '启动失败，点击重试';
-    startBtn.disabled = false;
+    console.error(error);
+    errText.innerHTML = `启动失败，原因：<br><span style="color:#ffaa00">${error.message}</span><br><br>如果是 iOS，说明苹果屏蔽了第三方浏览器的底层 AR。<br>如果是安卓，请检查梯子和 ARCore 服务。`;
+    btn.textContent = '重新尝试';
+    btn.disabled = false;
   }
 });
 </script>
