@@ -38,7 +38,6 @@
     background: rgba(20, 20, 20, 0.95); border: 1px solid rgba(255,255,255,0.2);
     border-radius: 12px; padding: 16px; width: 280px; display: none; flex-direction: column; gap: 12px;
   }
-  .debug-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
   #startOverlay {
     position: absolute; inset: 0; z-index: 100;
     background: radial-gradient(circle at 50% 35%, #1a1030, #000 75%);
@@ -54,6 +53,10 @@
     width: 100%; padding: 14px 0; font-size: 15px; font-weight: 700; color: #0a0a0a;
     background: linear-gradient(135deg, #a7f3d0, #6ee7b7); border: none; border-radius: 14px; margin-top: 15px;
   }
+  #errorLog {
+    color: #ff4d4d; font-size: 12px; margin-top: 10px; word-break: break-all;
+    display: none; text-align: left; background: rgba(255,0,0,0.1); padding: 10px; border-radius: 8px;
+  }
 </style>
 </head>
 <body>
@@ -64,20 +67,13 @@
   <div id="status">准备就绪</div>
   <div id="hint">扫描桌面，点击绿环放置</div>
   <div class="btn" id="resetBtn">↺ 重新放置</div>
-  <div class="btn" id="debugBtn">⚙️ 参数</div>
-
-  <div id="debugPanel">
-    <div class="debug-row">
-      <span>模型缩放</span>
-      <input type="range" id="scaleSlider" min="0.001" max="10" step="0.001" value="0.27">
-      <span id="scaleVal">0.27</span>
-    </div>
-  </div>
 
   <div id="startOverlay">
     <div class="start-card">
       <h1>🚀 真实 AR SLAM</h1>
+      <p style="font-size:12px;color:#aaa;margin-bottom:10px;">如果启动失败，错误原因会显示在下方</p>
       <button id="startBtn">启动 AR</button>
+      <div id="errorLog"></div>
     </div>
   </div>
 </div>
@@ -94,40 +90,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-let CONFIG = { SCALE: 0.27 };
 const MODEL_URL = 'https://raw.githubusercontent.com/boluohejuju/1/refs/heads/main/building.glb';
 
-const statusEl = document.getElementById('status');
-const hintEl = document.getElementById('hint');
-const threeCanvas = document.getElementById('three-canvas');
-const overlayEl = document.getElementById('ar-overlay');
-const resetBtn = document.getElementById('resetBtn');
-const debugBtn = document.getElementById('debugBtn');
-const debugPanel = document.getElementById('debugPanel');
-
-debugBtn.addEventListener('click', () => {
-  debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
-});
-
-document.getElementById('scaleSlider').addEventListener('input', (e) => {
-  CONFIG.SCALE = parseFloat(e.target.value);
-  document.getElementById('scaleVal').innerText = CONFIG.SCALE.toFixed(3);
-  if (flowerObj) {
-    const box1 = new THREE.Box3().setFromObject(flowerObj);
-    const s1 = box1.getSize(new THREE.Vector3());
-    const max1 = Math.max(s1.x, s1.y, s1.z) || 1;
-    flowerObj.scale.setScalar(CONFIG.SCALE / max1);
-  }
-});
-
-// ================= Three.js 核心 =================
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 200);
-const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas'), alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
-renderer.xr.enabled = true; // 启用 XR
+renderer.xr.enabled = true;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.5));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -143,17 +114,15 @@ scene.add(hitRing);
 
 let xrSession = null, xrRefSpace = null, hitTestSource = null;
 let xrHitMatrix = null, xrHitValid = false;
-let flowerObj = null, objRadius = 0.1, modelLoaded = false;
-let placingMode = true;
+let flowerObj = null, placingMode = true;
 
 // 加载模型
-statusEl.textContent = '正在加载模型...';
 const loader = new GLTFLoader();
 loader.load(MODEL_URL, (gltf) => {
     flowerObj = gltf.scene;
     const box = new THREE.Box3().setFromObject(flowerObj);
     const size = box.getSize(new THREE.Vector3());
-    flowerObj.scale.setScalar(CONFIG.SCALE / (Math.max(size.x, size.y, size.z) || 1));
+    flowerObj.scale.setScalar(0.27 / (Math.max(size.x, size.y, size.z) || 1));
 
     const box2 = new THREE.Box3().setFromObject(flowerObj);
     flowerObj.position.sub(box2.getCenter(new THREE.Vector3()));
@@ -163,37 +132,44 @@ loader.load(MODEL_URL, (gltf) => {
     objGroup.visible = false;
     scene.add(objGroup);
     flowerObj = objGroup;
-    
-    modelLoaded = true;
-    statusEl.textContent = '模型加载成功';
-}, undefined, () => { statusEl.textContent = '模型加载失败'; });
+});
 
-// 启动 AR（纯净无冲突版）
+// 启动 AR
 async function startAR() {
-  if (!navigator.xr) { return '浏览器不支持 WebXR'; }
+  const errorLog = document.getElementById('errorLog');
+  errorLog.style.display = 'none';
+  errorLog.textContent = '';
+
+  if (!navigator.xr) {
+    errorLog.textContent = '错误: 当前浏览器不支持 WebXR 模块。';
+    errorLog.style.display = 'block';
+    return false;
+  }
+
   try {
+    // 使用最基础的特性组合，避免 OPPO 系统拦截
     xrSession = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test', 'local-floor'],
-      optionalFeatures: ['dom-overlay'],
-      domOverlay: { root: document.getElementById('stage') }
+      requiredFeatures: ['hit-test'] 
     });
   } catch (e) {
-    console.error("ARSession 启动失败:", e);
-    return '启动失败: ' + e.message; // 返回真正的错误原因
+    errorLog.textContent = `底层报错: ${e.name} - ${e.message}`;
+    errorLog.style.display = 'block';
+    console.error(e);
+    return false;
   }
 
   await renderer.xr.setSession(xrSession);
-  xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
-  
-  const viewerSpace = await xrSession.requestReferenceSpace('viewer');
-  hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+  xrRefSpace = await xrSession.requestReferenceSpace('viewer');
+  hitTestSource = await xrSession.requestHitTestSource({ space: xrRefSpace });
+
+  // 改用 local 空间，兼容性更好
+  xrRefSpace = await xrSession.requestReferenceSpace('local');
 
   renderer.setAnimationLoop(xrLoop);
-  return 'ok';
+  return true;
 }
 
-// 点击放置
-overlayEl.addEventListener('pointerdown', () => {
+document.getElementById('ar-overlay').addEventListener('pointerdown', () => {
   if (!placingMode || !xrSession || !xrHitValid) return;
   
   const m = new THREE.Matrix4().fromArray(xrHitMatrix);
@@ -206,23 +182,22 @@ overlayEl.addEventListener('pointerdown', () => {
 
   placingMode = false;
   hitRing.visible = false;
-  hintEl.textContent = '已锚定在真实世界';
-  setTimeout(() => { hintEl.style.opacity = '0'; }, 4000);
-  resetBtn.style.display = 'block';
-  statusEl.textContent = '放置成功';
+  document.getElementById('hint').textContent = '已锚定在真实世界';
+  setTimeout(() => { document.getElementById('hint').style.opacity = '0'; }, 4000);
+  document.getElementById('resetBtn').style.display = 'block';
+  document.getElementById('status').textContent = '放置成功';
 });
 
-resetBtn.addEventListener('click', () => {
+document.getElementById('resetBtn').addEventListener('click', () => {
   placingMode = true;
   if (flowerObj) flowerObj.visible = false;
   hitRing.visible = false;
-  statusEl.textContent = '扫描平面中...';
-  hintEl.textContent = '移动手机扫描桌面';
-  hintEl.style.opacity = '1';
-  resetBtn.style.display = 'none';
+  document.getElementById('status').textContent = '扫描平面中...';
+  document.getElementById('hint').textContent = '移动手机扫描桌面';
+  document.getElementById('hint').style.opacity = '1';
+  document.getElementById('resetBtn').style.display = 'none';
 });
 
-// ================= 渲染循环 =================
 function xrLoop(time, frame) {
   if (!frame) return;
 
@@ -238,18 +213,17 @@ function xrLoop(time, frame) {
           hitRing.position.setFromMatrixPosition(m);
           hitRing.position.y += 0.005;
           hitRing.visible = true;
-          hintEl.textContent = '平面已锁定 · 点击屏幕放置';
+          document.getElementById('hint').textContent = '平面已锁定 · 点击屏幕放置';
         }
       }
     } else {
       xrHitValid = false;
       if (placingMode) {
         hitRing.visible = false;
-        hintEl.textContent = '移动手机扫描桌面...';
+        document.getElementById('hint').textContent = '移动手机扫描桌面...';
       }
     }
   }
-
   renderer.render(scene, camera);
 }
 
@@ -264,15 +238,11 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   startBtn.textContent = '启动中...';
   startBtn.disabled = true;
 
-  const result = await startAR();
-  
-  if (result === 'ok') {
+  const ok = await startAR();
+  if (ok) {
     document.getElementById('startOverlay').style.display = 'none';
   } else {
-    // 这次我们不弹笼统的弹窗，直接把错误打在按钮上
-    startBtn.textContent = result; 
-    startBtn.style.background = '#ff4d4d';
-    startBtn.style.color = '#fff';
+    startBtn.textContent = '启动失败';
     startBtn.disabled = false;
   }
 });
